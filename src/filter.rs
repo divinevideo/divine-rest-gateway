@@ -57,7 +57,7 @@ impl Filter {
             Some(3) => 600,   // contacts: 10 min
             Some(1) => 300,   // notes: 5 min
             Some(7) => 120,   // reactions: 2 min
-            _ => 180,         // default: 3 min
+            _ => 300,         // default: 5 min
         }
     }
 

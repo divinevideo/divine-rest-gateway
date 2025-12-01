@@ -298,10 +298,11 @@ fetch(`/query?filter=${encoded}`);</code></pre>
     <h2>Cache Behavior</h2>
     <p>TTLs vary by content type:</p>
     <ul>
-        <li><strong>Profiles (kind 0)</strong>: 5 minutes</li>
-        <li><strong>Relay lists (kind 10002)</strong>: 30 minutes</li>
-        <li><strong>Single events</strong>: 1 hour</li>
-        <li><strong>General queries</strong>: 1 minute</li>
+        <li><strong>Profiles (kind 0)</strong>: 15 minutes</li>
+        <li><strong>Contacts (kind 3)</strong>: 10 minutes</li>
+        <li><strong>Notes (kind 1)</strong>: 5 minutes</li>
+        <li><strong>Reactions (kind 7)</strong>: 2 minutes</li>
+        <li><strong>Other queries</strong>: 5 minutes</li>
     </ul>
 
     <h2>Source Code</h2>
