@@ -5,8 +5,11 @@ use worker::*;
 
 mod cache;
 mod filter;
+mod relay_pool;
 mod router;
 mod types;
+
+pub use relay_pool::RelayPool;
 
 #[event(fetch)]
 async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {

@@ -303,6 +303,7 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "console_error_panic_hook",
+ "futures-util",
  "getrandom",
  "hex",
  "js-sys",
@@ -310,6 +311,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "wasm-bindgen",
  "worker",
  "worker-macros",
 ]
