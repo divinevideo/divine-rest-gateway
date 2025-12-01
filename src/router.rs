@@ -146,7 +146,20 @@ async fn handle_publish_status(env: Env, event_id: &str) -> Result<Response> {
 }
 
 async fn handle_publish(mut req: Request, env: Env) -> Result<Response> {
-    // TODO: NIP-98 auth validation
+    // Get full URL for NIP-98 validation
+    let url = req.url()?.to_string();
+    let auth_header = req.headers().get("Authorization")?;
+
+    // Validate NIP-98 auth
+    match crate::auth::validate_nip98(auth_header.as_deref(), "POST", &url) {
+        Ok(_auth) => {
+            // Auth successful, proceed with publish
+        }
+        Err(e) => {
+            let err = ErrorResponse::new("auth_failed").with_detail(&e.to_string());
+            return json_response(&err, 401);
+        }
+    }
 
     let body: crate::types::PublishRequest = req.json().await?;
 

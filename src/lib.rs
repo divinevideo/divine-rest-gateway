@@ -3,6 +3,7 @@
 
 use worker::*;
 
+mod auth;
 mod cache;
 mod filter;
 mod queue_consumer;
