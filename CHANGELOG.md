@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.1] - 2025-12-01
+
+### Fixed
+
+- **Critical**: Custom tag filters (`#platform`, `#t`, etc.) were being dropped from cache keys and relay queries. Filters now preserve raw JSON to include ALL fields.
+
+### Added
+
+- CORS headers on all responses (`Access-Control-Allow-Origin: *`)
+- Comprehensive unit tests for auth, filter, and types modules
+- Integration tests against live gateway
+
 ## [0.1.0] - 2024-12-01
 
 ### Added
