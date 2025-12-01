@@ -109,6 +109,32 @@ mod tests {
     }
 
     #[test]
+    fn test_filter_roundtrip_all_fields() {
+        let filter = Filter {
+            ids: Some(vec!["id1".to_string(), "id2".to_string()]),
+            authors: Some(vec!["author1".to_string()]),
+            kinds: Some(vec![1, 6, 7]),
+            since: Some(1700000000),
+            until: Some(1700100000),
+            limit: Some(100),
+            e_tags: Some(vec!["event1".to_string()]),
+            p_tags: Some(vec!["pubkey1".to_string()]),
+        };
+
+        let encoded = filter.to_base64();
+        let decoded = Filter::from_base64(&encoded).unwrap();
+        assert_eq!(filter, decoded);
+    }
+
+    #[test]
+    fn test_filter_empty() {
+        let filter = Filter::default();
+        let encoded = filter.to_base64();
+        let decoded = Filter::from_base64(&encoded).unwrap();
+        assert_eq!(filter, decoded);
+    }
+
+    #[test]
     fn test_cache_key_deterministic() {
         let filter = Filter {
             authors: Some(vec!["abc".to_string()]),
@@ -128,18 +154,168 @@ mod tests {
     }
 
     #[test]
+    fn test_cache_key_different_for_different_filters() {
+        let filter1 = Filter {
+            authors: Some(vec!["abc".to_string()]),
+            ..Default::default()
+        };
+        let filter2 = Filter {
+            authors: Some(vec!["def".to_string()]),
+            ..Default::default()
+        };
+
+        assert_ne!(filter1.cache_key(), filter2.cache_key());
+    }
+
+    #[test]
+    fn test_cache_key_length() {
+        let filter = Filter::default();
+        let key = filter.cache_key();
+        // "query:" prefix (6 chars) + 32 hex chars (16 bytes) = 38 chars
+        assert_eq!(key.len(), 38);
+    }
+
+    #[test]
     fn test_ttl_by_kind() {
         let profile_filter = Filter {
             kinds: Some(vec![0]),
             ..Default::default()
         };
-        assert_eq!(profile_filter.ttl_seconds(), 900);
+        assert_eq!(profile_filter.ttl_seconds(), 900); // 15 min
 
         let note_filter = Filter {
             kinds: Some(vec![1]),
             ..Default::default()
         };
-        assert_eq!(note_filter.ttl_seconds(), 300);
+        assert_eq!(note_filter.ttl_seconds(), 300); // 5 min
+    }
+
+    #[test]
+    fn test_ttl_contacts() {
+        let filter = Filter {
+            kinds: Some(vec![3]),
+            ..Default::default()
+        };
+        assert_eq!(filter.ttl_seconds(), 600); // 10 min
+    }
+
+    #[test]
+    fn test_ttl_reactions() {
+        let filter = Filter {
+            kinds: Some(vec![7]),
+            ..Default::default()
+        };
+        assert_eq!(filter.ttl_seconds(), 120); // 2 min
+    }
+
+    #[test]
+    fn test_ttl_default() {
+        let filter = Filter {
+            kinds: Some(vec![30023]), // Long-form content
+            ..Default::default()
+        };
+        assert_eq!(filter.ttl_seconds(), 300); // 5 min default
+
+        let filter_no_kind = Filter::default();
+        assert_eq!(filter_no_kind.ttl_seconds(), 300); // 5 min default
+    }
+
+    #[test]
+    fn test_is_single_event_lookup_true() {
+        let filter = Filter {
+            ids: Some(vec!["abc123".to_string()]),
+            ..Default::default()
+        };
+        assert!(filter.is_single_event_lookup());
+    }
+
+    #[test]
+    fn test_is_single_event_lookup_false_multiple_ids() {
+        let filter = Filter {
+            ids: Some(vec!["abc".to_string(), "def".to_string()]),
+            ..Default::default()
+        };
+        assert!(!filter.is_single_event_lookup());
+    }
+
+    #[test]
+    fn test_is_single_event_lookup_false_with_authors() {
+        let filter = Filter {
+            ids: Some(vec!["abc".to_string()]),
+            authors: Some(vec!["author".to_string()]),
+            ..Default::default()
+        };
+        assert!(!filter.is_single_event_lookup());
+    }
+
+    #[test]
+    fn test_is_single_event_lookup_false_with_kinds() {
+        let filter = Filter {
+            ids: Some(vec!["abc".to_string()]),
+            kinds: Some(vec![1]),
+            ..Default::default()
+        };
+        assert!(!filter.is_single_event_lookup());
+    }
+
+    #[test]
+    fn test_is_single_event_lookup_false_no_ids() {
+        let filter = Filter::default();
+        assert!(!filter.is_single_event_lookup());
+    }
+
+    #[test]
+    fn test_from_base64_invalid_base64() {
+        let result = Filter::from_base64("not valid base64!!!");
+        assert!(matches!(result, Err(FilterError::InvalidBase64)));
+    }
+
+    #[test]
+    fn test_from_base64_invalid_utf8() {
+        // Valid base64 but invalid UTF-8
+        let invalid_utf8 = URL_SAFE_NO_PAD.encode(&[0xFF, 0xFE]);
+        let result = Filter::from_base64(&invalid_utf8);
+        assert!(matches!(result, Err(FilterError::InvalidUtf8)));
+    }
+
+    #[test]
+    fn test_from_base64_invalid_json() {
+        let not_json = URL_SAFE_NO_PAD.encode(b"not json");
+        let result = Filter::from_base64(&not_json);
+        assert!(matches!(result, Err(FilterError::InvalidJson)));
+    }
+
+    #[test]
+    fn test_filter_error_display() {
+        assert_eq!(FilterError::InvalidBase64.to_string(), "invalid base64 encoding");
+        assert_eq!(FilterError::InvalidUtf8.to_string(), "invalid UTF-8");
+        assert_eq!(FilterError::InvalidJson.to_string(), "invalid JSON filter");
+    }
+
+    #[test]
+    fn test_filter_serialization_skips_none() {
+        let filter = Filter {
+            kinds: Some(vec![1]),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&filter).unwrap();
+        // Should only contain "kinds", not null fields
+        assert!(json.contains("kinds"));
+        assert!(!json.contains("null"));
+        assert!(!json.contains("authors"));
+    }
+
+    #[test]
+    fn test_filter_tag_serialization() {
+        let filter = Filter {
+            e_tags: Some(vec!["event1".to_string()]),
+            p_tags: Some(vec!["pubkey1".to_string()]),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&filter).unwrap();
+        // Tags should be serialized with # prefix
+        assert!(json.contains("\"#e\""));
+        assert!(json.contains("\"#p\""));
     }
 }
 
