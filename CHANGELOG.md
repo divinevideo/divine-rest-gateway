@@ -7,6 +7,8 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - **Critical**: Custom tag filters (`#platform`, `#t`, etc.) were being dropped from cache keys and relay queries. Filters now preserve raw JSON to include ALL fields.
+- **Critical**: WebSocket queries could hang indefinitely. Added proper timeout handling using `futures::select` to race message receive against setTimeout.
+- Switch default relay from `relay.damus.io` to `relay.divine.video` (indexes `#platform` and other Divine-specific tags)
 
 ### Added
 
