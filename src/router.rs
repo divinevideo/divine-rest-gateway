@@ -306,7 +306,7 @@ fetch(`/query?filter=${encoded}`);</code></pre>
     </ul>
 
     <h2>Source Code</h2>
-    <p>Written in Rust, compiled to WebAssembly. <a href="https://github.com/divine-rest/divine-rest-gateway">View on GitHub</a></p>
+    <p>Written in Rust, compiled to WebAssembly. <a href="https://github.com/divinevideo/divine-rest-gateway">View on GitHub</a></p>
 
     <footer style="margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); color: #8b949e; font-size: 0.9em;">
         Divine REST Gateway v0.1.0 &middot; Powered by Cloudflare Workers
