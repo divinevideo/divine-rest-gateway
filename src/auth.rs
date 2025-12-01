@@ -2,6 +2,7 @@
 // ABOUTME: Validates kind 27235 auth events for authenticated endpoints
 
 use base64::{engine::general_purpose::STANDARD, Engine};
+use k256::schnorr::{signature::Verifier, Signature, VerifyingKey};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
@@ -115,7 +116,7 @@ pub fn validate_nip98(
 }
 
 fn verify_signature(event: &AuthEvent) -> bool {
-    // Compute event ID
+    // Compute event ID (SHA256 of serialized event)
     let serialized = serde_json::json!([
         0,
         event.pubkey,
@@ -130,45 +131,39 @@ fn verify_signature(event: &AuthEvent) -> bool {
     hasher.update(serialized_str.as_bytes());
     let computed_id = hex::encode(hasher.finalize());
 
+    // Verify computed ID matches claimed ID
     if computed_id != event.id {
         return false;
     }
 
-    // Verify schnorr signature using nostr crate's secp256k1 re-export
-    use nostr::secp256k1::{schnorr::Signature, Message, Secp256k1, XOnlyPublicKey};
-
-    let secp = Secp256k1::verification_only();
-
-    // Parse public key
-    let pubkey_bytes = match hex::decode(&event.pubkey) {
-        Ok(bytes) => bytes,
-        Err(_) => return false,
+    // Parse public key (32-byte x-only pubkey)
+    let pubkey_bytes: [u8; 32] = match hex::decode(&event.pubkey) {
+        Ok(bytes) if bytes.len() == 32 => bytes.try_into().unwrap(),
+        _ => return false,
     };
-    let pubkey = match XOnlyPublicKey::from_slice(&pubkey_bytes) {
-        Ok(pk) => pk,
+
+    let verifying_key = match VerifyingKey::from_bytes(&pubkey_bytes) {
+        Ok(vk) => vk,
         Err(_) => return false,
     };
 
-    // Parse signature
+    // Parse signature (64 bytes)
     let sig_bytes = match hex::decode(&event.sig) {
-        Ok(bytes) => bytes,
-        Err(_) => return false,
+        Ok(bytes) if bytes.len() == 64 => bytes,
+        _ => return false,
     };
-    let sig = match Signature::from_slice(&sig_bytes) {
+
+    let signature = match Signature::try_from(sig_bytes.as_slice()) {
         Ok(s) => s,
         Err(_) => return false,
     };
 
-    // Parse event ID as message
+    // Parse event ID as message (the hash that was signed)
     let id_bytes = match hex::decode(&event.id) {
-        Ok(bytes) => bytes,
-        Err(_) => return false,
-    };
-    let msg = match Message::from_digest_slice(&id_bytes) {
-        Ok(m) => m,
-        Err(_) => return false,
+        Ok(bytes) if bytes.len() == 32 => bytes,
+        _ => return false,
     };
 
-    // Verify the signature
-    secp.verify_schnorr(&sig, &msg, &pubkey).is_ok()
+    // Verify schnorr signature over the event ID
+    verifying_key.verify(&id_bytes, &signature).is_ok()
 }

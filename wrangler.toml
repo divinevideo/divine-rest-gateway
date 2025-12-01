@@ -13,8 +13,8 @@ RELAY_URL = "wss://relay.damus.io"
 # KV namespace for caching
 [[kv_namespaces]]
 binding = "REST_GATEWAY_CACHE"
-id = "YOUR_KV_NAMESPACE_ID"
-preview_id = "YOUR_PREVIEW_KV_NAMESPACE_ID"
+id = "7defa88baf784c46b44ec37f1cf33c87"
+preview_id = "950d141278b145e3a7e8c6f3e64a30bc"
 
 # Durable Object for relay connections
 [[durable_objects.bindings]]

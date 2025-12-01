@@ -13,7 +13,6 @@ pub struct RelayPool {
     relay_url: Option<String>,
 }
 
-#[durable_object]
 impl DurableObject for RelayPool {
     fn new(state: State, env: Env) -> Self {
         Self {
@@ -23,7 +22,7 @@ impl DurableObject for RelayPool {
         }
     }
 
-    async fn fetch(&mut self, req: Request) -> Result<Response> {
+    async fn fetch(&self, req: Request) -> Result<Response> {
         let url = req.url()?;
         let path = url.path();
 
@@ -44,19 +43,19 @@ impl RelayPool {
             .unwrap_or_else(|| "wss://relay.damus.io".to_string())
     }
 
-    async fn handle_query(&mut self, mut req: Request) -> Result<Response> {
+    async fn handle_query(&self, mut req: Request) -> Result<Response> {
         let filter: Filter = req.json().await?;
         let events = self.query_relay(&filter).await?;
         Response::from_json(&events)
     }
 
-    async fn handle_publish(&mut self, mut req: Request) -> Result<Response> {
+    async fn handle_publish(&self, mut req: Request) -> Result<Response> {
         let event: serde_json::Value = req.json().await?;
         let success = self.publish_to_relay(&event).await?;
         Response::from_json(&serde_json::json!({ "ok": success }))
     }
 
-    async fn handle_verify(&mut self, mut req: Request) -> Result<Response> {
+    async fn handle_verify(&self, mut req: Request) -> Result<Response> {
         let body: VerifyRequest = req.json().await?;
         let found = self.verify_event(&body.event_id).await?;
         Response::from_json(&serde_json::json!({ "found": found }))

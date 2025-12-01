@@ -7,8 +7,8 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-worker = { version = "0.4", features = ["queue"] }
-worker-macros = "0.4"
+worker = { version = "0.7", features = ["queue"] }
+worker-macros = "0.7"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 base64 = "0.22"
@@ -20,8 +20,8 @@ js-sys = "0.3"
 futures-util = "0.3"
 wasm-bindgen = "0.2"
 
-# Nostr
-nostr = { version = "0.37", default-features = false, features = ["std"] }
+# Pure Rust crypto for WASM (secp256k1-sys won't compile to WASM)
+k256 = { version = "0.13", default-features = false, features = ["ecdsa", "schnorr", "sha256"] }
 
 [profile.release]
 opt-level = "s"
