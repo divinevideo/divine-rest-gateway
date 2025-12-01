@@ -1,17 +1,22 @@
 name = "divine-rest-gateway"
 main = "build/worker/shim.mjs"
 compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
 
 [build]
 command = "cargo install -q worker-build && worker-build --release"
 
+# Default relay - override in .dev.vars or secrets
 [vars]
-RELAY_URL = "wss://relay.example.com"
+RELAY_URL = "wss://relay.damus.io"
 
+# KV namespace for caching
 [[kv_namespaces]]
 binding = "CACHE"
-id = "PLACEHOLDER_CACHE_ID"
+id = "YOUR_KV_NAMESPACE_ID"
+preview_id = "YOUR_PREVIEW_KV_NAMESPACE_ID"
 
+# Durable Object for relay connections
 [[durable_objects.bindings]]
 name = "RELAY_POOL"
 class_name = "RelayPool"
@@ -20,11 +25,17 @@ class_name = "RelayPool"
 tag = "v1"
 new_classes = ["RelayPool"]
 
+# Publish queue
 [[queues.producers]]
-queue = "publish-events"
+queue = "divine-publish-events"
 binding = "PUBLISH_QUEUE"
 
 [[queues.consumers]]
-queue = "publish-events"
+queue = "divine-publish-events"
+max_batch_size = 10
+max_batch_timeout = 5
 max_retries = 6
-dead_letter_queue = "publish-failed"
+dead_letter_queue = "divine-publish-failed"
+
+# Rate limiting (using Cloudflare's built-in)
+# Configure via dashboard or use KV-based in code
