@@ -12,7 +12,7 @@ pub async fn handle_request(req: Request, env: Env) -> Result<Response> {
     let method = req.method();
 
     match (method, path) {
-        (Method::Get, "/") => Response::ok("Divine REST Gateway v0.1.0"),
+        (Method::Get, "/") => landing_page(),
 
         (Method::Get, "/health") => Response::ok("ok"),
 
@@ -192,6 +192,130 @@ async fn handle_publish(mut req: Request, env: Env) -> Result<Response> {
         event_id,
     };
     json_response(&response, 202)
+}
+
+fn landing_page() -> Result<Response> {
+    let html = r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Divine REST Gateway</title>
+    <style>
+        :root { --bg: #0d1117; --fg: #c9d1d9; --accent: #58a6ff; --code-bg: #161b22; --border: #30363d; }
+        * { box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--fg); line-height: 1.6; margin: 0; padding: 2rem; max-width: 900px; margin: 0 auto; }
+        h1, h2, h3 { color: #fff; }
+        h1 { border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+        a { color: var(--accent); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        code { background: var(--code-bg); padding: 0.2rem 0.4rem; border-radius: 4px; font-size: 0.9em; }
+        pre { background: var(--code-bg); padding: 1rem; border-radius: 8px; overflow-x: auto; border: 1px solid var(--border); }
+        pre code { background: none; padding: 0; }
+        .endpoint { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; margin: 1rem 0; padding: 1rem; }
+        .method { display: inline-block; padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: bold; font-size: 0.8em; margin-right: 0.5rem; }
+        .get { background: #238636; color: #fff; }
+        .post { background: #8957e5; color: #fff; }
+        .path { font-family: monospace; color: var(--accent); }
+        .desc { margin-top: 0.5rem; color: #8b949e; }
+        .try-it { margin-top: 0.5rem; font-size: 0.9em; }
+    </style>
+</head>
+<body>
+    <h1>Divine REST Gateway</h1>
+    <p>REST API caching proxy for <a href="https://nostr.com">Nostr</a>, running on Cloudflare Workers.</p>
+
+    <h2>How It Works</h2>
+    <p>This gateway provides HTTP REST endpoints that proxy to Nostr relays via WebSocket, with multi-layer caching (CDN + KV) for fast reads. Perfect for web and mobile clients that prefer REST over WebSocket.</p>
+    <ul>
+        <li><strong>Read acceleration</strong>: CDN + KV caching with content-aware TTLs</li>
+        <li><strong>Write proxy</strong>: Reliable event publishing with verification and retries</li>
+        <li><strong>NIP-98 auth</strong>: Authenticated writes via HTTP Authorization header</li>
+        <li><strong>Edge deployment</strong>: Global distribution via Cloudflare's edge network</li>
+    </ul>
+
+    <h2>API Endpoints</h2>
+
+    <div class="endpoint">
+        <span class="method get">GET</span>
+        <span class="path">/query?filter=&lt;base64url-encoded-filter&gt;</span>
+        <p class="desc">Query events using a Nostr filter. The filter is base64url-encoded JSON.</p>
+        <div class="try-it">
+            <strong>Example filter:</strong> <code>{"kinds":[0],"limit":5}</code><br>
+            <a href="/query?filter=eyJraW5kcyI6WzBdLCJsaW1pdCI6NX0">Try it</a>
+        </div>
+    </div>
+
+    <div class="endpoint">
+        <span class="method get">GET</span>
+        <span class="path">/profile/{pubkey}</span>
+        <p class="desc">Get a user's profile (kind 0 event) by their public key.</p>
+        <div class="try-it">
+            <a href="/profile/82341f882b6eabcd2ba7f1ef90aad961cf074af15b9ef44a09f9d2a8fbfbe6a2">Example: jack's profile</a>
+        </div>
+    </div>
+
+    <div class="endpoint">
+        <span class="method get">GET</span>
+        <span class="path">/event/{id}</span>
+        <p class="desc">Get a single event by its ID.</p>
+    </div>
+
+    <div class="endpoint">
+        <span class="method post">POST</span>
+        <span class="path">/publish</span>
+        <p class="desc">Publish a signed Nostr event. Requires NIP-98 authentication.</p>
+        <pre><code>POST /publish
+Authorization: Nostr &lt;base64-nip98-event&gt;
+Content-Type: application/json
+
+{"event": {...signed nostr event...}}</code></pre>
+    </div>
+
+    <div class="endpoint">
+        <span class="method get">GET</span>
+        <span class="path">/publish/status/{event_id}</span>
+        <p class="desc">Check the publish status of an event.</p>
+    </div>
+
+    <h2>Filter Encoding</h2>
+    <p>Filters are standard <a href="https://github.com/nostr-protocol/nips/blob/master/01.md">NIP-01</a> filter objects, base64url-encoded for use in URLs:</p>
+    <pre><code>// JavaScript example
+const filter = {authors: ["pubkey"], kinds: [1], limit: 20};
+const encoded = btoa(JSON.stringify(filter))
+  .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+fetch(`/query?filter=${encoded}`);</code></pre>
+
+    <h2>Response Format</h2>
+    <pre><code>{
+  "events": [...],      // Array of Nostr events
+  "eose": true,         // End of stored events reached
+  "complete": true,     // Query fully satisfied
+  "cached": true,       // Response served from cache
+  "cache_age_seconds": 42
+}</code></pre>
+
+    <h2>Cache Behavior</h2>
+    <p>TTLs vary by content type:</p>
+    <ul>
+        <li><strong>Profiles (kind 0)</strong>: 5 minutes</li>
+        <li><strong>Relay lists (kind 10002)</strong>: 30 minutes</li>
+        <li><strong>Single events</strong>: 1 hour</li>
+        <li><strong>General queries</strong>: 1 minute</li>
+    </ul>
+
+    <h2>Source Code</h2>
+    <p>Written in Rust, compiled to WebAssembly. <a href="https://github.com/divine-rest/divine-rest-gateway">View on GitHub</a></p>
+
+    <footer style="margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); color: #8b949e; font-size: 0.9em;">
+        Divine REST Gateway v0.1.0 &middot; Powered by Cloudflare Workers
+    </footer>
+</body>
+</html>"#;
+
+    let mut headers = Headers::new();
+    headers.set("Content-Type", "text/html; charset=utf-8")?;
+    Ok(Response::from_body(ResponseBody::Body(html.as_bytes().to_vec()))?.with_headers(headers))
 }
 
 fn json_response<T: serde::Serialize>(data: &T, status: u16) -> Result<Response> {
