@@ -23,7 +23,7 @@ command = "cargo install -q worker-build && worker-build --release"
 
 # Default relay - override in .dev.vars or secrets
 [vars]
-RELAY_URL = "wss://relay.damus.io"
+RELAY_URL = "wss://relay.divine.video"
 
 # KV namespace for caching
 [[kv_namespaces]]

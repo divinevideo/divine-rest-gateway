@@ -3,6 +3,8 @@
 
 use futures_util::StreamExt;
 use serde::Deserialize;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::JsFuture;
 use worker::*;
 
 #[durable_object]
@@ -85,52 +87,86 @@ impl RelayPool {
         let mut events = Vec::new();
         let limit = 500; // Max events to collect before giving up
         let start = js_sys::Date::now();
-        let timeout_ms = 5000.0; // 5 second max
+        let max_timeout_ms = 5000.0; // 5 second max
         let idle_timeout_ms = 300.0; // 300ms idle timeout
+        let empty_timeout_ms = 1000.0; // 1s timeout for empty results
         let mut last_event_time = start;
 
         // Collect events until done
         loop {
             let now = js_sys::Date::now();
+            let elapsed = now - start;
 
-            // Check timeouts
-            if now - start > timeout_ms {
+            // Check timeouts BEFORE waiting
+            if elapsed > max_timeout_ms {
                 break; // Max timeout
             }
-            if !events.is_empty() && now - last_event_time > idle_timeout_ms {
+            if !events.is_empty() && (now - last_event_time) > idle_timeout_ms {
                 break; // Idle timeout after first event
             }
-            if events.is_empty() && now - start > 1000.0 {
+            if events.is_empty() && elapsed > empty_timeout_ms {
                 break; // 1s timeout for empty results
             }
             if events.len() >= limit {
                 break; // Limit reached
             }
 
-            // Try to receive next event
-            match event_stream.next().await {
-                Some(Ok(WebsocketEvent::Message(msg))) => {
-                    if let Some(text) = msg.text() {
-                        if let Ok(parsed) = serde_json::from_str::<Vec<serde_json::Value>>(&text) {
-                            if parsed.len() >= 2 {
-                                match parsed[0].as_str() {
-                                    Some("EVENT") if parsed.len() >= 3 => {
-                                        events.push(parsed[2].clone());
-                                        last_event_time = js_sys::Date::now();
+            // Calculate remaining time for this iteration
+            let remaining = if events.is_empty() {
+                empty_timeout_ms - elapsed
+            } else {
+                idle_timeout_ms.min(max_timeout_ms - elapsed)
+            };
+
+            if remaining <= 0.0 {
+                break;
+            }
+
+            // Race between next message and timeout
+            let next_msg = event_stream.next();
+            let timeout = Self::sleep_ms(remaining.min(500.0) as u32); // Check every 500ms max
+
+            // Use select to race timeout vs message
+            let result = futures_util::future::select(
+                Box::pin(next_msg),
+                Box::pin(timeout),
+            )
+            .await;
+
+            match result {
+                futures_util::future::Either::Left((msg_result, _)) => {
+                    // Got a message
+                    match msg_result {
+                        Some(Ok(WebsocketEvent::Message(msg))) => {
+                            if let Some(text) = msg.text() {
+                                if let Ok(parsed) =
+                                    serde_json::from_str::<Vec<serde_json::Value>>(&text)
+                                {
+                                    if parsed.len() >= 2 {
+                                        match parsed[0].as_str() {
+                                            Some("EVENT") if parsed.len() >= 3 => {
+                                                events.push(parsed[2].clone());
+                                                last_event_time = js_sys::Date::now();
+                                            }
+                                            Some("EOSE") => break,
+                                            Some("NOTICE") => {
+                                                console_log!("Relay notice: {:?}", parsed.get(1));
+                                            }
+                                            _ => {}
+                                        }
                                     }
-                                    Some("EOSE") => break,
-                                    Some("NOTICE") => {
-                                        console_log!("Relay notice: {:?}", parsed.get(1));
-                                    }
-                                    _ => {}
                                 }
                             }
                         }
+                        Some(Ok(WebsocketEvent::Close(_))) => break,
+                        Some(Err(_)) => break,
+                        None => break,
                     }
                 }
-                Some(Ok(WebsocketEvent::Close(_))) => break,
-                Some(Err(_)) => break,
-                None => break,
+                futures_util::future::Either::Right((_, _)) => {
+                    // Timeout - continue loop to re-check timeouts
+                    continue;
+                }
             }
         }
 
@@ -139,6 +175,19 @@ impl RelayPool {
         let _ = ws.send_with_str(&close_msg.to_string());
 
         Ok(events)
+    }
+
+    /// Sleep for specified milliseconds using JS setTimeout
+    async fn sleep_ms(ms: u32) {
+        let promise = js_sys::Promise::new(&mut |resolve, _| {
+            let global = js_sys::global();
+            if let Ok(set_timeout) = js_sys::Reflect::get(&global, &JsValue::from_str("setTimeout")) {
+                if let Ok(set_timeout_fn) = set_timeout.dyn_into::<js_sys::Function>() {
+                    let _ = set_timeout_fn.call2(&JsValue::NULL, &resolve, &JsValue::from(ms));
+                }
+            }
+        });
+        let _ = JsFuture::from(promise).await;
     }
 
     async fn publish_to_relay(&self, event: &serde_json::Value) -> Result<bool> {
