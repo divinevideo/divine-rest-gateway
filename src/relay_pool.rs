@@ -1,7 +1,6 @@
 // ABOUTME: Durable Object that maintains persistent websocket connections to Nostr relay
 // ABOUTME: Handles query execution, request coalescing, and connection management
 
-use crate::filter::Filter;
 use futures_util::StreamExt;
 use serde::Deserialize;
 use worker::*;
@@ -44,8 +43,9 @@ impl RelayPool {
     }
 
     async fn handle_query(&self, mut req: Request) -> Result<Response> {
-        let filter: Filter = req.json().await?;
-        let events = self.query_relay(&filter).await?;
+        // Get raw filter string - pass directly to relay without parsing
+        let filter_str = req.text().await?;
+        let events = self.query_relay_raw(&filter_str).await?;
         Response::from_json(&events)
     }
 
@@ -61,7 +61,8 @@ impl RelayPool {
         Response::from_json(&serde_json::json!({ "found": found }))
     }
 
-    async fn query_relay(&self, filter: &Filter) -> Result<Vec<serde_json::Value>> {
+    /// Query relay with raw filter string - NO PARSING, preserves ALL fields
+    async fn query_relay_raw(&self, filter_json: &str) -> Result<Vec<serde_json::Value>> {
         let relay_url = self.get_relay_url();
 
         // Parse URL for WebSocket connection
@@ -77,12 +78,12 @@ impl RelayPool {
         // Generate subscription ID
         let sub_id = format!("q{}", js_sys::Date::now() as u64);
 
-        // Send REQ message
-        let req_msg = serde_json::json!(["REQ", sub_id, filter]);
-        ws.send_with_str(&req_msg.to_string())?;
+        // Send REQ message - embed raw filter string directly into JSON array
+        let req_msg = format!(r#"["REQ","{}",{}]"#, sub_id, filter_json);
+        ws.send_with_str(&req_msg)?;
 
         let mut events = Vec::new();
-        let limit = filter.limit.unwrap_or(100);
+        let limit = 500; // Max events to collect before giving up
         let start = js_sys::Date::now();
         let timeout_ms = 5000.0; // 5 second max
         let idle_timeout_ms = 300.0; // 300ms idle timeout
@@ -181,13 +182,8 @@ impl RelayPool {
     }
 
     async fn verify_event(&self, event_id: &str) -> Result<bool> {
-        let filter = Filter {
-            ids: Some(vec![event_id.to_string()]),
-            limit: Some(1),
-            ..Default::default()
-        };
-
-        let events = self.query_relay(&filter).await?;
+        let filter = format!(r#"{{"ids":["{}"],"limit":1}}"#, event_id);
+        let events = self.query_relay_raw(&filter).await?;
         Ok(!events.is_empty())
     }
 }

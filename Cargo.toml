@@ -18,7 +18,7 @@ getrandom = { version = "0.2", features = ["js"] }
 console_error_panic_hook = "0.1"
 js-sys = "0.3"
 futures-util = "0.3"
-wasm-bindgen = "=0.2.105"
+wasm-bindgen = "0.2.106"
 
 # Pure Rust crypto for WASM (secp256k1-sys won't compile to WASM)
 k256 = { version = "0.13", default-features = false, features = ["ecdsa", "schnorr", "sha256"] }

@@ -105,11 +105,12 @@ async fn handle_query(req: Request, env: Env) -> Result<Response> {
     let relay_pool = env.durable_object("RELAY_POOL")?;
     let stub = relay_pool.id_from_name("default")?.get_stub()?;
 
+    // Pass the raw filter JSON directly to preserve ALL fields (tags, etc.)
     let do_req = Request::new_with_init(
         "http://do/query",
         RequestInit::new()
             .with_method(Method::Post)
-            .with_body(Some(serde_json::to_string(&filter)?.into())),
+            .with_body(Some(filter.raw_json.clone().into())),
     )?;
 
     let mut do_resp = stub.fetch_with_request(do_req).await?;
@@ -131,14 +132,10 @@ async fn handle_query(req: Request, env: Env) -> Result<Response> {
 }
 
 async fn handle_profile(_req: Request, env: Env, pubkey: &str) -> Result<Response> {
-    let filter = Filter {
-        authors: Some(vec![pubkey.to_string()]),
-        kinds: Some(vec![0]),
-        limit: Some(1),
-        ..Default::default()
-    };
+    // Create filter JSON directly
+    let filter_json = format!(r#"{{"authors":["{}"],"kinds":[0],"limit":1}}"#, pubkey);
+    let filter = Filter::from_json(&filter_json).map_err(|e| worker::Error::from(e.to_string()))?;
 
-    // Reuse query logic via internal request
     let encoded = filter.to_base64();
     let url = format!("http://internal/query?filter={}", encoded);
     let req = Request::new(&url, Method::Get)?;
@@ -146,11 +143,9 @@ async fn handle_profile(_req: Request, env: Env, pubkey: &str) -> Result<Respons
 }
 
 async fn handle_event(_req: Request, env: Env, event_id: &str) -> Result<Response> {
-    let filter = Filter {
-        ids: Some(vec![event_id.to_string()]),
-        limit: Some(1),
-        ..Default::default()
-    };
+    // Create filter JSON directly
+    let filter_json = format!(r#"{{"ids":["{}"],"limit":1}}"#, event_id);
+    let filter = Filter::from_json(&filter_json).map_err(|e| worker::Error::from(e.to_string()))?;
 
     let encoded = filter.to_base64();
     let url = format!("http://internal/query?filter={}", encoded);
