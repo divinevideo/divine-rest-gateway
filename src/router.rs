@@ -11,7 +11,12 @@ pub async fn handle_request(req: Request, env: Env) -> Result<Response> {
     let path = url.path();
     let method = req.method();
 
-    match (method, path) {
+    // Handle CORS preflight
+    if method == Method::Options {
+        return cors_preflight();
+    }
+
+    let response = match (method, path) {
         (Method::Get, "/") => landing_page(),
 
         (Method::Get, "/health") => Response::ok("ok"),
@@ -36,7 +41,28 @@ pub async fn handle_request(req: Request, env: Env) -> Result<Response> {
             let err = ErrorResponse::new("not_found").with_detail("endpoint not found");
             json_response(&err, 404)
         }
-    }
+    };
+
+    // Add CORS headers to all responses
+    add_cors_headers(response)
+}
+
+fn cors_preflight() -> Result<Response> {
+    let mut headers = Headers::new();
+    headers.set("Access-Control-Allow-Origin", "*")?;
+    headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")?;
+    headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization")?;
+    headers.set("Access-Control-Max-Age", "86400")?;
+    Ok(Response::empty()?.with_status(204).with_headers(headers))
+}
+
+fn add_cors_headers(response: Result<Response>) -> Result<Response> {
+    let mut resp = response?;
+    let headers = resp.headers_mut();
+    headers.set("Access-Control-Allow-Origin", "*")?;
+    headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")?;
+    headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization")?;
+    Ok(resp)
 }
 
 async fn handle_query(req: Request, env: Env) -> Result<Response> {
