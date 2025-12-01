@@ -52,8 +52,8 @@ GET /publish/status/{event_id}
 npm install -g wrangler
 
 # Create KV namespace
-wrangler kv:namespace create CACHE
-wrangler kv:namespace create CACHE --preview
+wrangler kv:namespace create REST_GATEWAY_CACHE
+wrangler kv:namespace create REST_GATEWAY_CACHE --preview
 
 # Update wrangler.toml with namespace IDs
 

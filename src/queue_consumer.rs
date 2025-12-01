@@ -8,7 +8,7 @@ use worker::*;
 pub async fn handle_queue(message_batch: MessageBatch<serde_json::Value>, env: Env) -> Result<()> {
     let relay_pool = env.durable_object("RELAY_POOL")?;
     let stub = relay_pool.id_from_name("default")?.get_stub()?;
-    let kv = env.kv("CACHE")?;
+    let kv = env.kv("REST_GATEWAY_CACHE")?;
     let cache = Cache::new(kv);
 
     for message in message_batch.messages()? {

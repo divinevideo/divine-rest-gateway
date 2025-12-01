@@ -12,7 +12,7 @@ RELAY_URL = "wss://relay.damus.io"
 
 # KV namespace for caching
 [[kv_namespaces]]
-binding = "CACHE"
+binding = "REST_GATEWAY_CACHE"
 id = "YOUR_KV_NAMESPACE_ID"
 preview_id = "YOUR_PREVIEW_KV_NAMESPACE_ID"
 

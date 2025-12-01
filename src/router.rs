@@ -59,7 +59,7 @@ async fn handle_query(req: Request, env: Env) -> Result<Response> {
         }
     };
 
-    let kv = env.kv("CACHE")?;
+    let kv = env.kv("REST_GATEWAY_CACHE")?;
     let cache = Cache::new(kv);
     let cache_key = filter.cache_key();
 
@@ -133,7 +133,7 @@ async fn handle_event(_req: Request, env: Env, event_id: &str) -> Result<Respons
 }
 
 async fn handle_publish_status(env: Env, event_id: &str) -> Result<Response> {
-    let kv = env.kv("CACHE")?;
+    let kv = env.kv("REST_GATEWAY_CACHE")?;
     let cache = Cache::new(kv);
 
     match cache.get_publish_status(event_id).await? {
@@ -177,7 +177,7 @@ async fn handle_publish(mut req: Request, env: Env) -> Result<Response> {
     // queue.send(body.event).await?;
 
     // Set initial status
-    let kv = env.kv("CACHE")?;
+    let kv = env.kv("REST_GATEWAY_CACHE")?;
     let cache = Cache::new(kv);
     let status = crate::types::PublishStatus {
         status: "queued".to_string(),
