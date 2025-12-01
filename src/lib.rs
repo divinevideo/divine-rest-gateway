@@ -3,6 +3,7 @@
 
 use worker::*;
 
+mod cache;
 mod filter;
 mod types;
 

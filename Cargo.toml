@@ -16,6 +16,7 @@ sha2 = "0.10"
 hex = "0.4"
 getrandom = { version = "0.2", features = ["js"] }
 console_error_panic_hook = "0.1"
+js-sys = "0.3"
 
 # Nostr
 nostr = { version = "0.37", default-features = false, features = ["std"] }
