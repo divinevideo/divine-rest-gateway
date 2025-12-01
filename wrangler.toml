@@ -1,0 +1,30 @@
+name = "divine-rest-gateway"
+main = "build/worker/shim.mjs"
+compatibility_date = "2024-01-01"
+
+[build]
+command = "cargo install -q worker-build && worker-build --release"
+
+[vars]
+RELAY_URL = "wss://relay.example.com"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "PLACEHOLDER_CACHE_ID"
+
+[[durable_objects.bindings]]
+name = "RELAY_POOL"
+class_name = "RelayPool"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["RelayPool"]
+
+[[queues.producers]]
+queue = "publish-events"
+binding = "PUBLISH_QUEUE"
+
+[[queues.consumers]]
+queue = "publish-events"
+max_retries = 6
+dead_letter_queue = "publish-failed"
