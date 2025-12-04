@@ -85,20 +85,33 @@ async fn handle_query(req: Request, env: Env) -> Result<Response> {
         }
     };
 
+    // Check for cache bypass: ?nocache=1 or Cache-Control: no-cache header
+    let nocache_param = params.get("nocache").map(|v| v == "1" || v == "true").unwrap_or(false);
+    let nocache_header = req
+        .headers()
+        .get("Cache-Control")
+        .ok()
+        .flatten()
+        .map(|v| v.contains("no-cache"))
+        .unwrap_or(false);
+    let skip_cache = nocache_param || nocache_header;
+
     let kv = env.kv("REST_GATEWAY_CACHE")?;
     let cache = Cache::new(kv);
     let cache_key = filter.cache_key();
 
-    // Check cache first
-    if let Some((cached, age)) = cache.get_query(&cache_key).await? {
-        let response = QueryResponse {
-            events: cached.events,
-            eose: cached.eose,
-            complete: cached.eose,
-            cached: true,
-            cache_age_seconds: Some(age),
-        };
-        return json_response_with_cache(&response, 200, filter.ttl_seconds());
+    // Check cache first (unless bypass requested)
+    if !skip_cache {
+        if let Some((cached, age)) = cache.get_query(&cache_key).await? {
+            let response = QueryResponse {
+                events: cached.events,
+                eose: cached.eose,
+                complete: cached.eose,
+                cached: true,
+                cache_age_seconds: Some(age),
+            };
+            return json_response_with_cache(&response, 200, filter.ttl_seconds());
+        }
     }
 
     // Cache miss - query relay via Durable Object
@@ -324,6 +337,12 @@ fetch(`/query?filter=${encoded}`);</code></pre>
         <li><strong>Notes (kind 1)</strong>: 5 minutes</li>
         <li><strong>Reactions (kind 7)</strong>: 2 minutes</li>
         <li><strong>Other queries</strong>: 5 minutes</li>
+    </ul>
+    <h3>Cache Bypass</h3>
+    <p>To force a fresh fetch from the relay, use either:</p>
+    <ul>
+        <li><code>?nocache=1</code> query parameter</li>
+        <li><code>Cache-Control: no-cache</code> request header</li>
     </ul>
 
     <h2>Source Code</h2>
