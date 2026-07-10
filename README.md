@@ -78,3 +78,7 @@ wrangler secret put RELAY_URL
 ## License
 
 MIT
+
+---
+
+Part of [Divine](https://divine.video) — your playground for human creativity · [Brand guidelines](https://github.com/divinevideo/brand-guidelines)
