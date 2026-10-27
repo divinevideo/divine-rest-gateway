@@ -1,0 +1,26 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Set up Rust
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup target add wasm32-unknown-unknown
+      - name: Unit and protocol tests
+        run: cargo test --locked --lib
+      - name: Verify runtime-test harness compiles
+        run: cargo test --locked --test short_links_local --no-run
+      - name: Build the Worker and verify bindings without deploying
+        run: npx --yes wrangler@4.50.0 deploy --dry-run

@@ -11,6 +11,9 @@ pub async fn handle_request(req: Request, env: Env) -> Result<Response> {
     let path = url.path();
     let method = req.method();
 
+    // The creator owns strict CORS and security handling, before legacy wildcard CORS.
+    if path == "/api/links" { return crate::short_links::handle(req, env).await; }
+
     // Handle CORS preflight
     if method == Method::Options {
         return cors_preflight();
