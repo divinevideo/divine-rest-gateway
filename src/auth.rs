@@ -2,7 +2,7 @@
 // ABOUTME: Validates kind 27235 auth events for authenticated endpoints
 
 use base64::{engine::general_purpose::STANDARD, Engine};
-use k256::schnorr::{signature::Verifier, Signature, VerifyingKey};
+use k256::schnorr::{Signature, VerifyingKey};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
@@ -22,13 +22,16 @@ pub enum AuthError {
     InvalidUrl,
     Expired,
     InvalidSignature,
+    InvalidPayload,
 }
 
 impl std::fmt::Display for AuthError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::MissingHeader => write!(f, "missing Authorization header"),
-            Self::InvalidFormat => write!(f, "invalid Authorization format, expected 'Nostr <token>'"),
+            Self::InvalidFormat => {
+                write!(f, "invalid Authorization format, expected 'Nostr <token>'")
+            }
             Self::InvalidBase64 => write!(f, "invalid base64 token"),
             Self::InvalidJson => write!(f, "invalid JSON event"),
             Self::InvalidKind => write!(f, "invalid event kind, expected 27235"),
@@ -36,11 +39,12 @@ impl std::fmt::Display for AuthError {
             Self::InvalidUrl => write!(f, "url tag does not match request"),
             Self::Expired => write!(f, "auth event expired"),
             Self::InvalidSignature => write!(f, "invalid event signature"),
+            Self::InvalidPayload => write!(f, "payload tag does not match request"),
         }
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, serde::Serialize)]
 #[cfg_attr(test, derive(Clone))]
 pub(crate) struct AuthEvent {
     id: String,
@@ -57,63 +61,85 @@ pub fn validate_nip98(
     method: &str,
     url: &str,
 ) -> Result<AuthResult, AuthError> {
-    let header = auth_header.ok_or(AuthError::MissingHeader)?;
+    validate_at(
+        auth_header,
+        method,
+        url,
+        None,
+        (js_sys::Date::now() / 1000.0) as u64,
+    )
+}
 
-    // Parse "Nostr <base64>" format
+/// Strict body-bound authentication for the protected creator. The injected time
+/// keeps the entire protocol validator testable without a JavaScript runtime.
+pub fn validate_creation(
+    auth_header: Option<&str>,
+    url: &str,
+    body: &[u8],
+    now: u64,
+) -> Result<AuthResult, AuthError> {
+    validate_at(auth_header, "POST", url, Some(body), now)
+}
+
+fn validate_at(
+    auth_header: Option<&str>,
+    method: &str,
+    url: &str,
+    body: Option<&[u8]>,
+    now: u64,
+) -> Result<AuthResult, AuthError> {
+    let header = auth_header.ok_or(AuthError::MissingHeader)?;
+    if header.len() > 16384 {
+        return Err(AuthError::InvalidFormat);
+    }
     let token = header
         .strip_prefix("Nostr ")
         .ok_or(AuthError::InvalidFormat)?;
-
-    // Decode base64
-    let json_bytes = STANDARD.decode(token).map_err(|_| AuthError::InvalidBase64)?;
-    let json_str = String::from_utf8(json_bytes).map_err(|_| AuthError::InvalidBase64)?;
-
-    // Parse event
-    let event: AuthEvent = serde_json::from_str(&json_str).map_err(|_| AuthError::InvalidJson)?;
-
-    // Validate kind
+    let bytes = STANDARD
+        .decode(token)
+        .map_err(|_| AuthError::InvalidBase64)?;
+    let event: AuthEvent = serde_json::from_slice(&bytes).map_err(|_| AuthError::InvalidJson)?;
     if event.kind != 27235 {
         return Err(AuthError::InvalidKind);
     }
-
-    // Check created_at within ±60 seconds
-    let now = (js_sys::Date::now() / 1000.0) as u64;
-    if event.created_at > now + 60 || event.created_at < now.saturating_sub(60) {
+    if event.created_at.abs_diff(now) > 60 {
         return Err(AuthError::Expired);
     }
-
-    // Validate method tag
-    let method_tag = event
-        .tags
-        .iter()
-        .find(|t| t.get(0).map(|s| s.as_str()) == Some("method"))
-        .and_then(|t| t.get(1))
-        .ok_or(AuthError::InvalidMethod)?;
-
-    if method_tag.to_uppercase() != method.to_uppercase() {
+    let method_tag = unique_tag(&event, "method").ok_or(AuthError::InvalidMethod)?;
+    if if body.is_some() {
+        method_tag != method
+    } else {
+        !method_tag.eq_ignore_ascii_case(method)
+    } {
         return Err(AuthError::InvalidMethod);
     }
-
-    // Validate URL tag
-    let url_tag = event
-        .tags
-        .iter()
-        .find(|t| t.get(0).map(|s| s.as_str()) == Some("u"))
-        .and_then(|t| t.get(1))
-        .ok_or(AuthError::InvalidUrl)?;
-
-    if url_tag != url {
+    if unique_tag(&event, "u") != Some(url) {
         return Err(AuthError::InvalidUrl);
     }
-
-    // Verify signature
+    if let Some(body) = body {
+        let digest = hex::encode(Sha256::digest(body));
+        if unique_tag(&event, "payload") != Some(digest.as_str()) {
+            return Err(AuthError::InvalidPayload);
+        }
+    }
     if !verify_signature(&event) {
         return Err(AuthError::InvalidSignature);
     }
-
     Ok(AuthResult {
-        pubkey: event.pubkey,
+        pubkey: event.pubkey.to_ascii_lowercase(),
     })
+}
+
+fn unique_tag<'a>(event: &'a AuthEvent, name: &str) -> Option<&'a str> {
+    let mut tags = event
+        .tags
+        .iter()
+        .filter(|tag| tag.first().map(String::as_str) == Some(name));
+    let tag = tags.next()?;
+    if tag.len() != 2 || tags.next().is_some() {
+        return None;
+    }
+    Some(tag[1].as_str())
 }
 
 // Made pub(crate) for testing
@@ -167,57 +193,25 @@ pub(crate) fn verify_signature(event: &AuthEvent) -> bool {
     };
 
     // Verify schnorr signature over the event ID
-    verifying_key.verify(&id_bytes, &signature).is_ok()
+    verifying_key.verify_raw(&id_bytes, &signature).is_ok()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // Valid NIP-98 style event (kind 27235) - generated with valid signature
-    fn make_test_event() -> AuthEvent {
-        // This is a real valid Nostr event structure
-        // Using a known test vector
-        AuthEvent {
-            id: "b9fead6eef87d8400cbc1a5621600b360438f6d8571c140f76c791ab1e872650".to_string(),
-            pubkey: "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798".to_string(),
+    #[test]
+    fn verifies_nostr_signature_over_event_id_without_hashing_again() {
+        let key = k256::schnorr::SigningKey::from_bytes(&[1u8; 32]).unwrap();
+        let mut event = AuthEvent {
+            id: String::new(),
+            pubkey: hex::encode(key.verifying_key().to_bytes()),
             created_at: 1234567890,
             kind: 27235,
-            tags: vec![
-                vec!["u".to_string(), "https://example.com/publish".to_string()],
-                vec!["method".to_string(), "POST".to_string()],
-            ],
-            content: "".to_string(),
-            sig: "f418c97b50cc68227e82f4f3a79d79eb2b7a0fa517859c86e1a8fa91e3741b6d4e5d9e1b8f9aa2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4".to_string(),
-        }
-    }
-
-    #[test]
-    fn test_auth_error_display() {
-        assert_eq!(AuthError::MissingHeader.to_string(), "missing Authorization header");
-        assert_eq!(AuthError::InvalidFormat.to_string(), "invalid Authorization format, expected 'Nostr <token>'");
-        assert_eq!(AuthError::InvalidBase64.to_string(), "invalid base64 token");
-        assert_eq!(AuthError::InvalidJson.to_string(), "invalid JSON event");
-        assert_eq!(AuthError::InvalidKind.to_string(), "invalid event kind, expected 27235");
-        assert_eq!(AuthError::InvalidMethod.to_string(), "method tag does not match request");
-        assert_eq!(AuthError::InvalidUrl.to_string(), "url tag does not match request");
-        assert_eq!(AuthError::Expired.to_string(), "auth event expired");
-        assert_eq!(AuthError::InvalidSignature.to_string(), "invalid event signature");
-    }
-
-    #[test]
-    fn test_event_id_computation() {
-        // Test that event ID is correctly computed as SHA256 of serialized event
-        let event = AuthEvent {
-            id: "".to_string(), // Will compute
-            pubkey: "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798".to_string(),
-            created_at: 1234567890,
-            kind: 1,
-            tags: vec![],
-            content: "test".to_string(),
-            sig: "".to_string(),
+            tags: vec![vec!["method".into(), "POST".into()]],
+            content: String::new(),
+            sig: String::new(),
         };
-
         let serialized = serde_json::json!([
             0,
             event.pubkey,
@@ -225,116 +219,180 @@ mod tests {
             event.kind,
             event.tags,
             event.content
-        ]);
-        let serialized_str = serialized.to_string();
-
-        let mut hasher = sha2::Sha256::new();
-        hasher.update(serialized_str.as_bytes());
-        let computed_id = hex::encode(hasher.finalize());
-
-        // Verify the ID format is correct (64 hex chars)
-        assert_eq!(computed_id.len(), 64);
-        assert!(computed_id.chars().all(|c| c.is_ascii_hexdigit()));
-    }
-
-    #[test]
-    fn test_verify_signature_invalid_pubkey() {
-        let mut event = make_test_event();
-        event.pubkey = "invalid".to_string();
+        ])
+        .to_string();
+        let id: [u8; 32] = Sha256::digest(serialized.as_bytes()).into();
+        event.id = hex::encode(id);
+        event.sig = hex::encode(
+            key.sign_prehash_with_aux_rand(&id, &[0u8; 32])
+                .unwrap()
+                .to_bytes(),
+        );
+        assert!(verify_signature(&event));
+        event.content = "tampered".into();
         assert!(!verify_signature(&event));
     }
 
-    #[test]
-    fn test_verify_signature_invalid_sig() {
-        let mut event = make_test_event();
-        event.sig = "invalid".to_string();
-        assert!(!verify_signature(&event));
+    fn signed_creation_header(body: &[u8], now: u64, extra: Option<Vec<String>>) -> String {
+        signed_creation_header_with_case(body, now, extra, false)
+    }
+
+    fn signed_creation_header_with_case(
+        body: &[u8],
+        now: u64,
+        extra: Option<Vec<String>>,
+        uppercase: bool,
+    ) -> String {
+        let key = k256::schnorr::SigningKey::from_bytes(&[1u8; 32]).unwrap();
+        let mut event = AuthEvent {
+            id: String::new(),
+            pubkey: hex::encode(key.verifying_key().to_bytes()),
+            created_at: now,
+            kind: 27235,
+            content: String::new(),
+            sig: String::new(),
+            tags: vec![
+                vec!["u".into(), "https://gateway.divine.video/api/links".into()],
+                vec!["method".into(), "POST".into()],
+                vec!["payload".into(), hex::encode(Sha256::digest(body))],
+            ],
+        };
+        if uppercase {
+            event.pubkey = event.pubkey.to_ascii_uppercase();
+        }
+        if let Some(tag) = extra {
+            event.tags.push(tag);
+        }
+        let serialized = serde_json::json!([
+            0,
+            event.pubkey,
+            event.created_at,
+            event.kind,
+            event.tags,
+            event.content
+        ])
+        .to_string();
+        let id: [u8; 32] = Sha256::digest(serialized.as_bytes()).into();
+        event.id = hex::encode(id);
+        event.sig = hex::encode(
+            key.sign_prehash_with_aux_rand(&id, &[0u8; 32])
+                .unwrap()
+                .to_bytes(),
+        );
+        format!(
+            "Nostr {}",
+            STANDARD.encode(serde_json::to_vec(&event).unwrap())
+        )
     }
 
     #[test]
-    fn test_verify_signature_wrong_length_pubkey() {
-        let mut event = make_test_event();
-        event.pubkey = "abcd".to_string(); // Too short
-        assert!(!verify_signature(&event));
+    fn equivalent_key_encodings_share_one_authenticated_identity() {
+        let body = br#"{"url":"https://divine.video/video/synthetic"}"#;
+        let url = "https://gateway.divine.video/api/links";
+        let lower = signed_creation_header_with_case(body, 1000, None, false);
+        let upper = signed_creation_header_with_case(body, 1000, None, true);
+        let lower = validate_creation(Some(&lower), url, body, 1000).unwrap();
+        let upper = validate_creation(Some(&upper), url, body, 1000).unwrap();
+        assert_eq!(lower.pubkey, upper.pubkey);
     }
 
     #[test]
-    fn test_verify_signature_wrong_length_sig() {
-        let mut event = make_test_event();
-        event.sig = "abcd".to_string(); // Too short
-        assert!(!verify_signature(&event));
+    fn creation_auth_binds_body_url_timestamp_and_unique_tags() {
+        let body = br#"{"url":"https://divine.video/video/synthetic"}"#;
+        let url = "https://gateway.divine.video/api/links";
+        let header = signed_creation_header(body, 1000, None);
+        assert!(validate_creation(Some(&header), url, body, 1000).is_ok());
+        assert!(matches!(
+            validate_creation(Some(&header), url, b"changed", 1000),
+            Err(AuthError::InvalidPayload)
+        ));
+        assert!(matches!(
+            validate_creation(Some(&header), "https://other.example/api/links", body, 1000),
+            Err(AuthError::InvalidUrl)
+        ));
+        for now in [939, 1061, u64::MAX] {
+            assert!(matches!(
+                validate_creation(Some(&header), url, body, now),
+                Err(AuthError::Expired)
+            ));
+        }
+        for tag in [
+            vec!["method".into(), "POST".into()],
+            vec!["u".into(), url.into()],
+            vec!["payload".into(), "bad".into()],
+        ] {
+            let header = signed_creation_header(body, 1000, Some(tag));
+            assert!(validate_creation(Some(&header), url, body, 1000).is_err());
+        }
+        let tampered = header.replace("Nostr ", "Bearer ");
+        assert!(validate_creation(Some(&tampered), url, body, 1000).is_err());
     }
 
     #[test]
-    fn test_verify_signature_id_mismatch() {
-        let mut event = make_test_event();
-        event.id = "0000000000000000000000000000000000000000000000000000000000000000".to_string();
-        assert!(!verify_signature(&event));
+    fn test_auth_error_display() {
+        assert_eq!(
+            AuthError::MissingHeader.to_string(),
+            "missing Authorization header"
+        );
+        assert_eq!(
+            AuthError::InvalidFormat.to_string(),
+            "invalid Authorization format, expected 'Nostr <token>'"
+        );
+        assert_eq!(AuthError::InvalidBase64.to_string(), "invalid base64 token");
+        assert_eq!(AuthError::InvalidJson.to_string(), "invalid JSON event");
+        assert_eq!(
+            AuthError::InvalidKind.to_string(),
+            "invalid event kind, expected 27235"
+        );
+        assert_eq!(
+            AuthError::InvalidMethod.to_string(),
+            "method tag does not match request"
+        );
+        assert_eq!(
+            AuthError::InvalidUrl.to_string(),
+            "url tag does not match request"
+        );
+        assert_eq!(AuthError::Expired.to_string(), "auth event expired");
+        assert_eq!(
+            AuthError::InvalidSignature.to_string(),
+            "invalid event signature"
+        );
     }
 
     #[test]
-    fn test_parse_auth_header_missing() {
-        // Can't test full validate_nip98 without js_sys, but we can test header parsing
-        let result = None::<&str>.ok_or(AuthError::MissingHeader);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_parse_auth_header_wrong_format() {
-        let header = "Bearer token123";
-        let result = header.strip_prefix("Nostr ");
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_parse_auth_header_correct_format() {
-        let header = "Nostr dGVzdA==";
-        let token = header.strip_prefix("Nostr ");
-        assert_eq!(token, Some("dGVzdA=="));
-    }
-
-    #[test]
-    fn test_base64_decode() {
-        let token = "eyJ0ZXN0IjogdHJ1ZX0="; // {"test": true}
-        let decoded = STANDARD.decode(token).unwrap();
-        let json_str = String::from_utf8(decoded).unwrap();
-        assert!(json_str.contains("test"));
-    }
-
-    #[test]
-    fn test_method_tag_extraction() {
-        let tags = vec![
-            vec!["u".to_string(), "https://example.com".to_string()],
-            vec!["method".to_string(), "POST".to_string()],
-        ];
-
-        let method_tag = tags
-            .iter()
-            .find(|t| t.get(0).map(|s| s.as_str()) == Some("method"))
-            .and_then(|t| t.get(1));
-
-        assert_eq!(method_tag, Some(&"POST".to_string()));
-    }
-
-    #[test]
-    fn test_url_tag_extraction() {
-        let tags = vec![
-            vec!["u".to_string(), "https://example.com/api".to_string()],
-            vec!["method".to_string(), "GET".to_string()],
-        ];
-
-        let url_tag = tags
-            .iter()
-            .find(|t| t.get(0).map(|s| s.as_str()) == Some("u"))
-            .and_then(|t| t.get(1));
-
-        assert_eq!(url_tag, Some(&"https://example.com/api".to_string()));
-    }
-
-    #[test]
-    fn test_method_comparison_case_insensitive() {
-        let method_tag = "post";
-        let request_method = "POST";
-        assert_eq!(method_tag.to_uppercase(), request_method.to_uppercase());
+    fn creation_auth_rejects_invalid_headers_and_binding_changes() {
+        let body = br#"{"url":"https://divine.video/video/synthetic"}"#;
+        let url = "https://gateway.divine.video/api/links";
+        for header in [
+            None,
+            Some("Bearer test"),
+            Some("Nostr !!!"),
+            Some("Nostr e30="),
+        ] {
+            assert!(validate_creation(header, url, body, 1000).is_err());
+        }
+        let header = signed_creation_header(body, 1000, None);
+        for mutation in ["method", "kind", "payload", "signature"] {
+            let bytes = STANDARD
+                .decode(header.strip_prefix("Nostr ").unwrap())
+                .unwrap();
+            let mut event: AuthEvent = serde_json::from_slice(&bytes).unwrap();
+            match mutation {
+                "method" => event.tags[1][1] = "GET".into(),
+                "kind" => event.kind = 1,
+                "payload" => {
+                    event.tags.pop();
+                }
+                _ => event.sig = "00".repeat(64),
+            }
+            let changed = format!(
+                "Nostr {}",
+                STANDARD.encode(serde_json::to_vec(&event).unwrap())
+            );
+            assert!(
+                validate_creation(Some(&changed), url, body, 1000).is_err(),
+                "{mutation}"
+            );
+        }
     }
 }
