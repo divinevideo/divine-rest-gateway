@@ -126,7 +126,7 @@ fn validate_at(
         return Err(AuthError::InvalidSignature);
     }
     Ok(AuthResult {
-        pubkey: event.pubkey,
+        pubkey: event.pubkey.to_ascii_lowercase(),
     })
 }
 
@@ -234,6 +234,15 @@ mod tests {
     }
 
     fn signed_creation_header(body: &[u8], now: u64, extra: Option<Vec<String>>) -> String {
+        signed_creation_header_with_case(body, now, extra, false)
+    }
+
+    fn signed_creation_header_with_case(
+        body: &[u8],
+        now: u64,
+        extra: Option<Vec<String>>,
+        uppercase: bool,
+    ) -> String {
         let key = k256::schnorr::SigningKey::from_bytes(&[1u8; 32]).unwrap();
         let mut event = AuthEvent {
             id: String::new(),
@@ -248,6 +257,9 @@ mod tests {
                 vec!["payload".into(), hex::encode(Sha256::digest(body))],
             ],
         };
+        if uppercase {
+            event.pubkey = event.pubkey.to_ascii_uppercase();
+        }
         if let Some(tag) = extra {
             event.tags.push(tag);
         }
@@ -271,6 +283,17 @@ mod tests {
             "Nostr {}",
             STANDARD.encode(serde_json::to_vec(&event).unwrap())
         )
+    }
+
+    #[test]
+    fn equivalent_key_encodings_share_one_authenticated_identity() {
+        let body = br#"{"url":"https://divine.video/video/synthetic"}"#;
+        let url = "https://gateway.divine.video/api/links";
+        let lower = signed_creation_header_with_case(body, 1000, None, false);
+        let upper = signed_creation_header_with_case(body, 1000, None, true);
+        let lower = validate_creation(Some(&lower), url, body, 1000).unwrap();
+        let upper = validate_creation(Some(&upper), url, body, 1000).unwrap();
+        assert_eq!(lower.pubkey, upper.pubkey);
     }
 
     #[test]
