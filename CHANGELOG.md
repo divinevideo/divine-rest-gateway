@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Short-link creation**: `POST /api/links` creates short links for Divine video and profile URLs through the link shortener, authenticated with body-bound NIP-98 and limited to 30 per minute per pubkey and 120 per minute per client IP. Off unless `SHORT_LINK_CREATION_ENABLED` is `true`.
+- `SHORT_LINK_LIMITER` SQLite Durable Object (migration `v2`) and the `SHORT_LINK_CREATION_TOKEN` secret
+- CI workflow that runs the unit tests, compiles the short-link runtime tests, and builds the Worker without deploying
+
+### Fixed
+
+- NIP-98 signature verification hashed the event ID a second time, so every genuine Nostr signature was rejected, including on `POST /publish`. The signature is now verified over the event ID directly.
+
+### Changed
+
+- NIP-98 validation requires exactly one `method` and one `u` tag and rejects `Authorization` headers longer than 16 KiB
+- `worker-build` is pinned to 0.7.1
+
 ## [0.1.1] - 2025-12-01
 
 ### Fixed
