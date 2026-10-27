@@ -103,7 +103,7 @@ Creates a short link for a Divine video or profile URL, or returns the existing 
 
 - **Body:** at most 4096 bytes of `application/json` containing only a `url` field, either `https://divine.video/video/<id>` or `https://divine.video/profile/<pubkey>` (64 hex characters or an `npub`). IDs may contain ASCII letters, digits, `-`, `.`, `_` and `~`; query strings, fragments and percent-encoding are rejected with `400`.
 - **Authentication:** a NIP-98 event bound to this exact request: `u` is `https://gateway.divine.video/api/links`, `method` is `POST`, a `payload` tag holds the lowercase hex SHA-256 of the exact request body, and `created_at` is within 60 seconds. Anything else gets `401`.
-- **Quotas:** 30 creations per minute per authenticated pubkey and 120 per minute per client IP, counted in fixed one-minute windows. An exhausted quota gets `429` with `Retry-After: 60`.
+- **Quotas:** 30 requests per minute per authenticated pubkey and 120 per minute per client IP, counted in fixed one-minute windows. A request counts once it passes authentication and validation, before the shortener is called, so one that returns an existing link or ends in an upstream `503` still counts, and retrying a `503` uses quota. An exhausted quota gets `429` with `Retry-After: 60`; a `429` does not count.
 - **CORS:** browsers may call it only from `https://divine.video` and `https://www.divine.video`; other origins get `403`. Requests without an `Origin` header, such as those from native apps, are accepted.
 
 A new link returns `201 Created` and an existing one `200 OK`:
