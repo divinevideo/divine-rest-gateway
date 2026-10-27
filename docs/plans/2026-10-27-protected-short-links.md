@@ -17,7 +17,7 @@ Implementation and verification:
 1. Signed synthetic Nostr regression, then correct raw event-ID verification; native auth tests pin binding/expiry/body/signature failure.
 2. Pure creation contract tests pin canonical URLs, JSON shape, origin rules and returned mapping.
 3. Add Worker handler and limiter, preserve existing routes, add a v2 SQLite migration and default-off variable.
-4. Build Wasm and run local Wrangler HTTP tests for auth, CORS, gate, concurrency/quota, failure and positive creation against the fixed production shortener using only synthetic verification targets. Inspect production bindings before deployment; provision only the new secret/object. Default gate stays off until smoke checks pass.
+4. Build Wasm and run local Wrangler HTTP tests for auth, CORS, gate, concurrency/quota, failure and positive creation against the fixed production shortener using only synthetic verification targets. Inspect production bindings before deployment; provision only the new secret/object. Default gate stays off until smoke checks pass. SHORT_LINK_CREATION_ENABLED is declared in wrangler.toml and keep_vars is not set, so every wrangler deploy applies the committed value and reverts a dashboard-only change; open or close the gate by changing the committed value.
 5. Independent current-diff review and normal CI/merge. Sender gates remain off until receiving and device compatibility gates pass.
 
 ## Local runtime verification

@@ -186,7 +186,7 @@ Configuration lives in `wrangler.toml`:
 - **`REST_GATEWAY_CACHE`** (KV namespace) — stores cached query results and publish-status records.
 - **`RELAY_POOL`** (Durable Object, class `RelayPool`) — holds the persistent relay WebSocket connections.
 - **`PUBLISH_QUEUE`** (Queue producer → `divine-publish-events`) and its consumer, which retries up to 6 times with `divine-publish-failed` as the dead-letter queue.
-- **`SHORT_LINK_CREATION_ENABLED`** (var) — turns on `POST /api/links` when exactly `true`. It is `false` in `wrangler.toml`.
+- **`SHORT_LINK_CREATION_ENABLED`** (var) — turns on `POST /api/links` when exactly `true`. It is `false` in `wrangler.toml`, and because `keep_vars` is not set, every `wrangler deploy` applies the committed value: a change made only in the Cloudflare dashboard is reverted by the next deploy.
 - **`SHORT_LINK_CREATION_TOKEN`** (secret) — the bearer token the gateway sends to the link shortener. Set it with `wrangler secret put SHORT_LINK_CREATION_TOKEN`; it is never returned to clients.
 - **`SHORT_LINK_LIMITER`** (Durable Object, class `ShortLinkLimiter`, SQLite storage from the `v2` migration) — enforces the short-link creation quotas.
 
