@@ -22,7 +22,7 @@ Implementation and verification:
 
 ## Local runtime verification
 
-Use only a synthetic target and an isolated local state directory. Put the server-only SHORT_LINK_CREATION_TOKEN in ignored .dev.vars with mode0600; never put the credential in a command argument. A valid bearer calls the fixed production shortener and creates/reuses only the synthetic verification mapping. The local Worker keeps the gateway's canonical URL through the documented local-upstream override.
+Use only a synthetic target and an isolated local state directory. Put the server-only SHORT_LINK_CREATION_TOKEN in ignored .dev.vars with mode 0600; never put the credential in a command argument. A valid bearer calls the fixed production shortener and creates/reuses only the synthetic verification mapping. The local Worker keeps the gateway's canonical URL through the documented local-upstream override.
 
 ```sh
 wrangler deploy --dry-run
@@ -30,6 +30,6 @@ wrangler dev --local --port 9785 --inspector-port 9786 --local-upstream gateway.
 cargo test --locked --test short_links_local -- --ignored --test-threads=1
 ```
 
-Run the test command in a second terminal. The tests require unused synthetic quota windows; do not reuse state within the same minute. They test the actual Wasm handler and SQLite object, including 35 concurrent calls with exactly30 identity admits and125 calls across five keys with exactly120 IP admits. Upstream availability and local clock boundaries are environment-dependent; the IP test permits controlled503 for an admitted request when the upstream deadline expires.
+Run the test command in a second terminal. The tests require unused synthetic quota windows; do not reuse state within the same minute. They test the actual Wasm handler and SQLite object, including 35 concurrent calls with exactly 30 identity admits and 125 calls across five keys with exactly 120 IP admits. Upstream availability and local clock boundaries are environment-dependent; the IP test permits controlled 503 for an admitted request when the upstream deadline expires.
 
 The default cargo test run intentionally does not start a Worker or use a production bearer. CI compiles this harness, runs pure protocol/contract tests, and builds the Wasm package without deploying. Local runtime evidence is required separately.

@@ -32,7 +32,7 @@ fn authorization(body: &[u8], identity: u8) -> String {
 }
 
 #[test]
-#[ignore = "requires isolated local Wrangler on9785; see protected short-link design"]
+#[ignore = "requires isolated local Wrangler on 9785; see protected short-link design"]
 fn protected_creation_http_and_concurrent_quota() {
     let client = Arc::new(
         Client::builder()
@@ -101,7 +101,7 @@ fn protected_creation_http_and_concurrent_quota() {
         .unwrap();
     assert!(
         created.status().is_success(),
-        "creator status{}",
+        "creator status {}",
         created.status()
     );
     let mapping: serde_json::Value = created.json().unwrap();
@@ -117,7 +117,7 @@ fn protected_creation_http_and_concurrent_quota() {
             mapping["code"].as_str().unwrap()
         )
     );
-    // A separate synthetic identity gets exactly30 admits despite concurrent calls.
+    // A separate synthetic identity gets exactly 30 admits despite concurrent calls.
     let signed = Arc::new(authorization(body, 3));
     let jobs: Vec<_> = (0..35)
         .map(|_| {
@@ -151,7 +151,7 @@ fn protected_creation_http_and_concurrent_quota() {
 }
 
 #[test]
-#[ignore = "requires isolated local Wrangler on9785; see protected short-link design"]
+#[ignore = "requires isolated local Wrangler on 9785; see protected short-link design"]
 fn ip_quota_applies_across_authenticated_identities() {
     let seconds = SystemTime::now()
         .duration_since(UNIX_EPOCH)
