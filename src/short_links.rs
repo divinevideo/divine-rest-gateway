@@ -1,7 +1,7 @@
 // ABOUTME: Body-bound authenticated creation proxy with explicit origins, quotas and deadlines.
 use crate::{
     auth,
-    short_link_contract::{origin_allowed, parse_creation_body, validate_mapping},
+    short_link_contract::{ip_quota_key, origin_allowed, parse_creation_body, validate_mapping},
     short_link_limiter::QuotaKeys,
 };
 use futures_util::{
@@ -106,7 +106,10 @@ async fn handle_inner(req: &mut Request, env: &Env, origin: Option<&str>) -> Res
             "short-link:identity:{}",
             identity.pubkey
         ))),
-        ip: hex::encode(Sha256::digest(format!("short-link:ip:{ip}"))),
+        ip: match ip_quota_key(&ip) {
+            Some(key) => key,
+            None => return Response::error("temporarily_unavailable", 503),
+        },
     };
     let namespace = env.durable_object("SHORT_LINK_LIMITER")?;
     let stub = namespace.id_from_name("creator-v1")?.get_stub()?;
