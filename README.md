@@ -15,7 +15,7 @@ The gateway runs at [gateway.divine.video](https://gateway.divine.video), which 
 | `GET` | `/event/{id}` | Convenience wrapper for a single event by ID |
 | `POST` | `/publish` | Publish a signed event (requires NIP-98 auth) |
 | `GET` | `/publish/status/{event_id}` | Look up the recorded status of a publish |
-| `POST` | `/api/links` | Create a short link for a Divine video or profile URL (requires NIP-98 auth; off unless enabled) |
+| `POST` | `/api/links` | Create a short link for a Divine video or profile URL (requires NIP-98 auth) |
 
 Every path except `/api/links` adds permissive CORS headers (`Access-Control-Allow-Origin: *`) to its responses and answers `OPTIONS` preflight requests. `/api/links` applies its own strict CORS policy, described below.
 
@@ -176,7 +176,7 @@ wrangler queues create divine-publish-events
 wrangler queues create divine-publish-failed
 ```
 
-Update the generated namespace IDs in `wrangler.toml` if they differ from the committed values. The `SHORT_LINK_LIMITER` Durable Object is created by the `v2` migration on deploy. Before enabling `POST /api/links`, store the link shortener's bearer token with `wrangler secret put SHORT_LINK_CREATION_TOKEN`.
+Update the generated namespace IDs in `wrangler.toml` if they differ from the committed values. The `SHORT_LINK_LIMITER` Durable Object is created by the `v2` migration on deploy. Creation is enabled in the committed `wrangler.toml`, so store the link shortener's bearer token with `wrangler secret put SHORT_LINK_CREATION_TOKEN` before or immediately after the first deploy; until the secret exists, `POST /api/links` returns `503`.
 
 ## Configuration
 
