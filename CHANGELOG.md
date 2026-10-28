@@ -4,19 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Fixed
-
-- Normalize short-link client-network quota keys, grouping IPv6 addresses by /64 and IPv4-mapped addresses with IPv4.
-
 ### Added
 
-- **Short-link creation**: `POST /api/links` creates short links for Divine video and profile URLs through the link shortener, authenticated with body-bound NIP-98 and limited to 30 per minute per pubkey and 120 per minute per client IP. Enabled in the committed `wrangler.toml`; set `SHORT_LINK_CREATION_ENABLED` to `false` and deploy to pause creation.
+- **Short-link creation**: `POST /api/links` creates short links for Divine video and profile URLs through the link shortener, authenticated with body-bound NIP-98 and limited to 30 per minute per pubkey and 120 per minute per client IPv4 address or IPv6 /64 network. Enabled in the committed `wrangler.toml`; set `SHORT_LINK_CREATION_ENABLED` to `false` and deploy to pause creation.
 - `SHORT_LINK_LIMITER` SQLite Durable Object (migration `v2`) and the `SHORT_LINK_CREATION_TOKEN` secret
 - CI workflow that runs the unit tests, compiles the short-link runtime tests, and builds the Worker without deploying
 
 ### Fixed
 
 - NIP-98 signature verification hashed the event ID a second time, so every genuine Nostr signature was rejected, including on `POST /publish`. The signature is now verified over the event ID directly.
+- Normalize short-link client-network quota keys, grouping IPv6 addresses by /64 and IPv4-mapped addresses with IPv4.
 
 ### Changed
 
