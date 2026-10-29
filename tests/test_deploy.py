@@ -166,8 +166,9 @@ class ReleaseTests(unittest.TestCase):
     def serving(deployment_id, version):
         return {"id": deployment_id, "versions": [{"version_id": version, "percentage": 100}]}
 
-    def run_driver(self, *, stale=False, upload_failure=False, health_failure=False, lookups=None):
-        """`lookups` overrides the provider's active deployments, in call order, to simulate a mismatch."""
+    def run_driver(self, *, stale=False, upload_failure=False, health_failure=False, lookups=None,
+                   expect_failure=False):
+        """`lookups` overrides the provider's active deployments, in call order."""
         version = "00000000-0000-4000-8000-000000000001"
         active = self.serving("deployment", version)
         env = self.env | {"CLOUDFLARE_ACCOUNT_ID": "0" * 32,
@@ -190,7 +191,7 @@ class ReleaseTests(unittest.TestCase):
                 calls.attach_mock(config, "config")
                 calls.attach_mock(upload, "upload")
                 calls.attach_mock(health, "health")
-                if stale or upload_failure or health_failure or lookups is not None:
+                if stale or upload_failure or health_failure or expect_failure:
                     with self.assertRaises(RuntimeError):
                         deploy.main()
                 else:
@@ -200,10 +201,12 @@ class ReleaseTests(unittest.TestCase):
                 return json.loads(receipt.read_text())
 
     def test_success_receipt(self):
-        receipt = self.run_driver()
+        previous = self.serving("previous", "00000000-0000-4000-8000-000000000000")
+        uploaded = self.serving("deployment", "00000000-0000-4000-8000-000000000001")
+        receipt = self.run_driver(lookups=[previous, uploaded, uploaded])
         self.assertEqual(receipt["result"], "verified")
         self.assertEqual(receipt["source_sha"], self.sha)
-        self.assertEqual(receipt["previous_deployment_id"], "deployment")
+        self.assertEqual(receipt["previous_deployment_id"], "previous")
         self.assertEqual(receipt["version_id"], "00000000-0000-4000-8000-000000000001")
         self.assertEqual(receipt["deployment_id"], "deployment")
 
@@ -221,7 +224,7 @@ class ReleaseTests(unittest.TestCase):
 
     def test_upload_that_never_serves_is_not_success(self):
         previous = self.serving("previous", "00000000-0000-4000-8000-000000000000")
-        receipt = self.run_driver(lookups=[previous] * 4)
+        receipt = self.run_driver(lookups=[previous] * 4, expect_failure=True)
         self.assertEqual(receipt["result"], "failed")
         self.assertNotIn("deployment_id", receipt)
         self.assertEqual(self.calls, ["lookup", "config", "upload", "lookup", "lookup", "lookup"])
@@ -229,7 +232,7 @@ class ReleaseTests(unittest.TestCase):
     def test_release_replaced_after_health_probe_is_not_success(self):
         uploaded = self.serving("deployment", "00000000-0000-4000-8000-000000000001")
         other = self.serving("other", "00000000-0000-4000-8000-000000000002")
-        receipt = self.run_driver(lookups=[uploaded, uploaded] + [other] * 3)
+        receipt = self.run_driver(lookups=[uploaded, uploaded] + [other] * 3, expect_failure=True)
         self.assertEqual(receipt["result"], "failed")
         self.assertEqual(self.calls, ["lookup", "config", "upload", "lookup", "health", "lookup", "lookup", "lookup"])
 
