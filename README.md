@@ -156,7 +156,7 @@ cargo check
 # Run the Worker locally (builds the WASM via worker-build)
 wrangler dev
 
-# Deploy to Cloudflare
+# Operator-authorized manual deploy only; coordinate with CD (docs/deployment.md)
 wrangler deploy
 ```
 
