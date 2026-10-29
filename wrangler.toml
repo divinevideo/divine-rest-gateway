@@ -24,7 +24,7 @@ command = "cargo install -q worker-build --version 0.7.1 --locked && worker-buil
 # Default relay - override in .dev.vars or secrets
 [vars]
 RELAY_URL = "wss://relay.divine.video"
-SHORT_LINK_CREATION_ENABLED = "false"
+SHORT_LINK_CREATION_ENABLED = "true"
 
 # KV namespace for caching
 [[kv_namespaces]]
@@ -56,7 +56,7 @@ dead_letter_queue = "divine-publish-failed"
 # Rate limiting (using Cloudflare's built-in)
 # Configure via dashboard or use KV-based in code
 
-# Body-bound creator quotas; the bearer is configured with wrangler secret put.
+# Anonymous creator IP quota; the bearer is configured with wrangler secret put.
 [[durable_objects.bindings]]
 name = "SHORT_LINK_LIMITER"
 class_name = "ShortLinkLimiter"
