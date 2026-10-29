@@ -201,6 +201,7 @@ class ReleaseTests(unittest.TestCase):
         receipt = self.run_driver()
         self.assertEqual(receipt["result"], "verified")
         self.assertEqual(receipt["source_sha"], self.sha)
+        self.assertEqual(receipt["previous_deployment_id"], "deployment")
         self.assertEqual(receipt["version_id"], "00000000-0000-4000-8000-000000000001")
         self.assertEqual(receipt["deployment_id"], "deployment")
 
@@ -214,12 +215,14 @@ class ReleaseTests(unittest.TestCase):
     def test_upload_and_health_failures_are_not_success(self):
         self.assertEqual(self.run_driver(upload_failure=True)["result"], "failed")
         self.assertEqual(self.run_driver(health_failure=True)["result"], "failed")
+        self.assertEqual(self.calls, ["lookup", "config", "upload", "lookup", "health", "health", "health"])
 
     def test_upload_that_never_serves_is_not_success(self):
         previous = self.serving("previous", "00000000-0000-4000-8000-000000000000")
         receipt = self.run_driver(lookups=[previous] * 4)
         self.assertEqual(receipt["result"], "failed")
         self.assertNotIn("deployment_id", receipt)
+        self.assertEqual(self.calls, ["lookup", "config", "upload", "lookup", "lookup", "lookup"])
 
     def test_release_replaced_after_health_probe_is_not_success(self):
         uploaded = self.serving("deployment", "00000000-0000-4000-8000-000000000001")
