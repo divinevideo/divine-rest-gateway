@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 spec = importlib.util.spec_from_file_location("deploy", Path(__file__).parents[1] / "scripts/deploy.py")
 deploy = importlib.util.module_from_spec(spec)
@@ -28,10 +28,11 @@ class ReleaseTests(unittest.TestCase):
         for key, value in (("GITHUB_REF", "refs/heads/topic"),
                            ("GITHUB_EVENT_NAME", "pull_request"),
                            ("GITHUB_EVENT_NAME", "pull_request_target"),
-                           ("GITHUB_REPOSITORY", "someone/fork"),
-                           ("GITHUB_SHA", "not-a-sha")):
+                           ("GITHUB_REPOSITORY", "someone/fork")):
             with self.subTest(key=key, value=value), self.assertRaises(RuntimeError):
                 deploy.require_main(self.env | {key: value}, self.sha, self.sha)
+        with self.assertRaises(RuntimeError):
+            deploy.require_main(self.env | {"GITHUB_SHA": "not-a-sha"}, "not-a-sha", "not-a-sha")
         for main, checkout in (("b" * 40, self.sha), (self.sha, "b" * 40)):
             with self.assertRaises(RuntimeError):
                 deploy.require_main(self.env, main, checkout)
@@ -83,9 +84,10 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(deploy.retry_read(operation), "ok")
             sleep.assert_called_once_with(2)
         operation = MagicMock(side_effect=RuntimeError("still wrong"))
-        with patch.object(deploy.time, "sleep"), self.assertRaises(RuntimeError):
+        with patch.object(deploy.time, "sleep") as sleep, self.assertRaises(RuntimeError):
             deploy.retry_read(operation)
         self.assertEqual(operation.call_count, 3)
+        self.assertEqual(sleep.call_args_list, [call(2), call(4)])
 
     def test_prepared_config_preserves_all_nonbuild_settings(self):
         source = Path(__file__).parents[1] / "wrangler.toml"
@@ -103,6 +105,17 @@ class ReleaseTests(unittest.TestCase):
                 prepared.write_text(source.read_text())
                 with self.assertRaisesRegex(RuntimeError, "removed custom build"):
                     deploy.require_upload_config()
+
+    def test_upload_config_rejects_unexpected_worker_or_domain(self):
+        source = Path(__file__).parents[1] / "wrangler.toml"
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(deploy, "UPLOAD_CONFIG", Path(directory) / "upload.toml"), \
+                    patch.object(deploy, "Path", return_value=source):
+                deploy.prepare_upload_config()
+                for name, value in (("WORKER", "other-worker"), ("HEALTH", "https://other.invalid/health")):
+                    with self.subTest(name=name), patch.object(deploy, name, value), \
+                            self.assertRaisesRegex(RuntimeError, "Release identity"):
+                        deploy.require_upload_config()
 
     def test_upload_streams_output_and_never_builds_or_resolves_packages(self):
         process = MagicMock()
@@ -152,13 +165,14 @@ class ReleaseTests(unittest.TestCase):
                     patch.object(deploy, "active_deployment", return_value=active, side_effect=lookups) as lookup, \
                     patch.object(deploy, "get_json", return_value={"sha": "b" * 40 if stale else self.sha}), \
                     patch.object(deploy.subprocess, "check_output", return_value=self.sha + "\n"), \
-                    patch.object(deploy, "require_upload_config"), \
+                    patch.object(deploy, "require_upload_config") as config, \
                     patch.object(deploy, "deploy_worker", return_value=f"Current Version ID: {version}\n",
                                  side_effect=RuntimeError("upload failed") if upload_failure else None) as upload, \
                     patch.object(deploy.time, "sleep"), \
                     patch.object(deploy, "check_health", side_effect=RuntimeError("unhealthy") if health_failure else None) as health, \
                     patch("builtins.print"):
                 calls.attach_mock(lookup, "lookup")
+                calls.attach_mock(config, "config")
                 calls.attach_mock(upload, "upload")
                 calls.attach_mock(health, "health")
                 if stale or upload_failure or health_failure or lookups is not None:
@@ -177,9 +191,9 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(receipt["version_id"], "00000000-0000-4000-8000-000000000001")
         self.assertEqual(receipt["deployment_id"], "deployment")
 
-    def test_success_rechecks_active_version_after_health_probe(self):
+    def test_success_runs_checks_in_release_order(self):
         self.run_driver()
-        self.assertEqual(self.calls, ["lookup", "upload", "lookup", "health", "lookup"])
+        self.assertEqual(self.calls, ["lookup", "config", "upload", "lookup", "health", "lookup"])
 
     def test_stale_run_never_uploads(self):
         self.assertEqual(self.run_driver(stale=True)["result"], "failed")
@@ -199,7 +213,7 @@ class ReleaseTests(unittest.TestCase):
         other = self.serving("other", "00000000-0000-4000-8000-000000000002")
         receipt = self.run_driver(lookups=[uploaded, uploaded] + [other] * 3)
         self.assertEqual(receipt["result"], "failed")
-        self.assertEqual(self.calls, ["lookup", "upload", "lookup", "health", "lookup", "lookup", "lookup"])
+        self.assertEqual(self.calls, ["lookup", "config", "upload", "lookup", "health", "lookup", "lookup", "lookup"])
 
 
 if __name__ == "__main__":
