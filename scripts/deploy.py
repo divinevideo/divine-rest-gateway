@@ -139,9 +139,9 @@ def main():
             "https://api.github.com/repos/divinevideo/divine-rest-gateway/commits/main",
             env["GH_TOKEN"],
         )["sha"]
+        # The stale-main check runs inside the production lock, after environment approval.
         require_main(env, current_main, checkout)
         require_upload_config()
-        # This check runs inside the production concurrency lock, after environment approval.
         output = deploy_worker()
         versions = re.findall(r"Current Version ID:\s*([0-9a-f-]{36})", output)
         if len(versions) != 1:

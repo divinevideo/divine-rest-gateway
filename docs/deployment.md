@@ -70,12 +70,18 @@ Only main push and main manual events can enter the production job. No arbitrary
 SHA input or PR deployment exists. The `production-worker` concurrency lock is
 non-cancelling and covers environment approval, deployment and verification.
 GitHub does not promise FIFO ordering: the driver re-reads current main inside
-the lock immediately before starting Wrangler and fails stale runs. A merge
-after this check can temporarily leave production behind main, but no newer
-workflow deployment can be overwritten by an older workflow run. Superseded PR
-verification runs can be cancelled; main runs and production activation cannot.
-Cancelled
-pending runs are not release successes. Manual replay on main reruns validation;
+the lock immediately before starting Wrangler and fails stale runs. No newer
+workflow deployment can be overwritten by an older workflow run, but automatic
+eventual deployment of current main is not guaranteed. GitHub keeps only one
+pending job per concurrency group and can replace it when another job queues,
+even with `cancel-in-progress: false`. An older, slower verification can therefore
+queue a stale deployment that replaces a newer pending release, then fail its
+main-SHA guard. Production stays unchanged and the newer release needs a fresh
+manual run on main. Inspect cancelled/pending runs and compare production's
+recorded source SHA with main before considering a release delivered.
+Running production jobs are not cancelled by this workflow's concurrency
+settings; superseded PR verification runs can be cancelled. Cancelled pending
+runs are not release successes. Manual replay on main reruns validation;
 if its recorded SHA is stale, start a new main run rather than rerunning it.
 
 The driver first requires an existing active deployment, then records the new
