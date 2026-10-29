@@ -7,8 +7,8 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.ref }}-${{ github.run_id }}
-  cancel-in-progress: false
+  group: ci-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -26,7 +26,10 @@ jobs:
       - name: Verify runtime-test harness compiles
         run: cargo test --locked --test short_links_local --no-run
       - name: Build the Worker and verify bindings without deploying
-        run: npx --yes wrangler@4.50.0 deploy --dry-run
+        run: |
+          npx --yes wrangler@4.50.0 deploy --dry-run --outdir .wrangler/release
+          python3 scripts/deploy.py --prepare
+          npx --offline --yes wrangler@4.50.0 deploy --no-bundle --config .wrangler-release.toml --dry-run
   deploy:
     needs: verify
     if: >-
@@ -49,6 +52,12 @@ jobs:
           rustup update stable --no-self-update
           rustup default stable
           rustup target add wasm32-unknown-unknown
+      - name: Build without deployment credentials
+        env:
+          WRANGLER_SEND_METRICS: 'false'
+        run: |
+          npx --yes wrangler@4.50.0 deploy --dry-run --outdir .wrangler/release
+          python3 scripts/deploy.py --prepare
       - name: Deploy checked main commit and verify production
         env:
           GH_TOKEN: ${{ github.token }}

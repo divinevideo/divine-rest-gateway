@@ -5,7 +5,7 @@
 The workflow is shipped disabled. Merging it does not authorize activation,
 provision credentials/resources, move traffic, or enable a product feature.
 Keep the repository variable `PRODUCTION_CD_ENABLED` unset until these steps are
-complete. This change has not performed a production deployment.
+complete.
 
 1. Confirm with the serving-service owner that `divine-rest-gateway` in the
    intended Cloudflare account serves `gateway.divine.video`. Read the current
@@ -23,9 +23,8 @@ complete. This change has not performed a production deployment.
 3. Configure the GitHub `production` environment before enabling CD. Restrict it
    to the protected `main` branch and apply the owner's production approval rules
    (required reviewers, prevention of self-review/bypass as appropriate). Reuse
-   existing protections if present; the workflow cannot create them. The initial
-   implementation found no environment to inherit, so this remains an explicit
-   prerequisite rather than an implied protection.
+   existing protections if present; the workflow cannot create them. If the
+   environment is missing, creating and protecting it is an explicit prerequisite.
 4. Set `CLOUDFLARE_ACCOUNT_ID` as a **production environment variable**. Store
    `CLOUDFLARE_API_TOKEN` as a **production environment secret**, not a repository
    secret available to PR jobs. Use a scoped token, not a global API key. Limit
@@ -49,8 +48,17 @@ guard tests, compiles the runtime harness, and performs the pinned
 `wrangler@4.50.0 deploy --dry-run` build. It never runs live integration tests or
 side-effecting test traffic. Production `deploy` requires that exact workflow's
 `verify` success and uses the immutable `github.sha` checkout, not a moving branch.
-It uses the repository's existing Wrangler release build command. Rust follows
-the existing stable toolchain policy; Wrangler and checkout are pinned.
+It uses the repository's existing Wrangler release build command in a separate
+step **without** the production token. That step warms the pinned Wrangler cache
+and prepares a root-level upload config that is parsed and compared with
+`wrangler.toml`: `[build]` is removed, `main` points at the prebundled
+`.wrangler/release/shim.js`, and `find_additional_modules=true` includes its Wasm
+module. All runtime bindings, variables and routes must be identical. The upload validates that comparison,
+uses cached Wrangler offline with `--no-bundle`, and does not execute the custom
+build or dependency build scripts. Wrangler's own cached runtime dependencies
+still necessarily have the upload credential. Rust follows the existing stable
+toolchain policy; Wrangler and checkout are pinned. Offline tests enforce matching
+workflow/driver Wrangler pins and the prepared config comparison.
 
 Only main push and main manual events can enter the production job. No arbitrary
 SHA input or PR deployment exists. The `production-worker` concurrency lock is
@@ -58,23 +66,28 @@ non-cancelling and covers environment approval, build, deployment and verificati
 GitHub does not promise FIFO ordering: the driver re-reads current main inside
 the lock immediately before starting Wrangler and fails stale runs. A merge
 after this check can temporarily leave production behind main, but no newer
-workflow deployment can be overwritten by an older workflow run. Cancelled
+workflow deployment can be overwritten by an older workflow run. Superseded PR
+verification runs can be cancelled; main runs and production activation cannot.
+Cancelled
 pending runs are not release successes. Manual replay on main reruns validation;
 if its recorded SHA is stale, start a new main run rather than rerunning it.
 
 The driver first requires an existing active deployment, then records the new
 version reported by Wrangler and verifies it is serving 100% through the
 [Cloudflare deployments API](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/deployments/methods/list/).
-It GETs only `/health` (HTTP 200 and body `ok`) and rechecks the active version.
+It GETs only `/health` with an explicit deployment User-Agent (HTTP 200 and body
+`ok`) and rechecks the active version. Each post-deployment read or probe has up
+to three attempts with 2- and 4-second backoffs. Upload itself is never retried.
 This establishes control-plane version state plus endpoint health, not a
 per-request version assertion from the public endpoint. There is no automatic
 publish/query smoke traffic, rollback, or resource deletion.
 
-Every driver exit writes `deployment-receipt.json` on the runner, prints it in
-the job log and appends it to the workflow summary: full source SHA, environment,
+Every driver exit writes a temporary `deployment-receipt.json` on the runner,
+prints it in the job log and appends it to the workflow summary: full source SHA, environment,
 Worker, Wrangler version, previous deployment ID, uploaded version ID and active
 deployment ID when available, and `verified` or `failed`. The run's URL provides
-the durable source-to-provider-version link; retain that evidence under the
+the durable source-to-provider-version link, not the runner-local file (which
+is not uploaded and disappears with the runner); retain the summary/log under the
 repository's Actions retention policy. A disabled/skipped job is **not** evidence
 of a production release. A failed upload, stale run, API read, version mismatch,
 or health probe fails the job, even if a provider upload already took effect.
