@@ -68,7 +68,7 @@ workflow/driver Wrangler pins and the prepared config comparison.
 
 Only main push and main manual events can enter the production job. No arbitrary
 SHA input or PR deployment exists. The `production-worker` concurrency lock is
-non-cancelling and covers environment approval, build, deployment and verification.
+non-cancelling and covers environment approval, deployment and verification.
 GitHub does not promise FIFO ordering: the driver re-reads current main inside
 the lock immediately before starting Wrangler and fails stale runs. A merge
 after this check can temporarily leave production behind main, but no newer
