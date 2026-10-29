@@ -1,13 +1,14 @@
 name: CI
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches: [main]
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.ref }}-${{ github.run_id }}
+  cancel-in-progress: false
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -20,7 +21,38 @@ jobs:
           rustup target add wasm32-unknown-unknown
       - name: Unit and protocol tests
         run: cargo test --locked --lib
+      - name: Deployment guard and verification tests (offline)
+        run: python3 -m unittest discover -s tests -p 'test_deploy.py'
       - name: Verify runtime-test harness compiles
         run: cargo test --locked --test short_links_local --no-run
       - name: Build the Worker and verify bindings without deploying
         run: npx --yes wrangler@4.50.0 deploy --dry-run
+  deploy:
+    needs: verify
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      vars.PRODUCTION_CD_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    concurrency:
+      group: production-worker
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Set up Rust
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup target add wasm32-unknown-unknown
+      - name: Deploy checked main commit and verify production
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_SEND_METRICS: 'false'
+        run: python3 scripts/deploy.py

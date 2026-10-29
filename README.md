@@ -194,7 +194,7 @@ Observability logging is enabled with 100% head sampling, and the Worker is boun
 
 ## Deployment
 
-Deployment is manual via `wrangler deploy`, which runs the `worker-build` release step and uploads the Worker. There is no automated deploy workflow in this repository. `.github/workflows/ci.yml` runs the unit tests, compiles the short-link runtime tests, and builds the Worker with `wrangler deploy --dry-run` without deploying; `.github/workflows/semantic_pr.yml` enforces Conventional Commit PR titles.
+`.github/workflows/ci.yml` checks each commit before its production deployment job can run. Production automation is **off until an operator completes the activation prerequisites** and sets the repository variable `PRODUCTION_CD_ENABLED=true`. Pull requests only run checks. A manual replay must select `main` and still reruns the checks; old runs cannot deploy over current main. See [the deployment runbook](docs/deployment.md) for account/binding verification, credentials, environment protections, release receipts, and rollback. `.github/workflows/semantic_pr.yml` enforces Conventional Commit PR titles.
 
 See `CHANGELOG.md` for release history and `docs/react-client-usage.md` for a client integration guide.
 
