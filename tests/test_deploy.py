@@ -123,7 +123,13 @@ class ReleaseTests(unittest.TestCase):
 
     def test_workflow_build_precedes_token_and_pins_match(self):
         workflow = (Path(__file__).parents[1] / ".github/workflows/ci.yml").read_text()
-        self.assertLess(workflow.index("name: Build without deployment credentials"), workflow.index("CLOUDFLARE_API_TOKEN:"))
+        verify, upload = workflow.split("\n  deploy:", 1)
+        self.assertNotIn("CLOUDFLARE_API_TOKEN", verify)
+        self.assertIn("actions/upload-artifact@", verify)
+        self.assertIn("actions/download-artifact@", upload)
+        self.assertNotIn("rustup", upload)
+        self.assertNotIn("--outdir", upload)
+        self.assertLess(upload.index("name: Prepare the trusted uploader"), upload.index("CLOUDFLARE_API_TOKEN:"))
         pins = deploy.re.findall(r"wrangler@([0-9.]+)", workflow)
         self.assertTrue(pins)
         self.assertEqual(set(pins), {deploy.WRANGLER_VERSION})

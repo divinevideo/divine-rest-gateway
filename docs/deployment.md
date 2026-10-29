@@ -48,15 +48,21 @@ guard tests, compiles the runtime harness, and performs the pinned
 `wrangler@4.50.0 deploy --dry-run` build. It never runs live integration tests or
 side-effecting test traffic. Production `deploy` requires that exact workflow's
 `verify` success and uses the immutable `github.sha` checkout, not a moving branch.
-It uses the repository's existing Wrangler release build command in a separate
-step **without** the production token. That step warms the pinned Wrangler cache
-and prepares a root-level upload config that is parsed and compared with
+It uses the repository's existing Wrangler release build command in the
+`verify` job, which has no production environment or deployment token. That job
+retains only the checked JavaScript and Wasm bundle as the `checked-worker`
+artifact for seven days. The production job runs on a fresh runner and downloads
+that artifact from this same workflow run, not another run or branch. It does not
+install Rust, run cargo or execute build-produced code. It installs the trusted
+pinned Wrangler uploader and prepares a root-level upload config from its own
+fresh checkout, parsed and compared with
 `wrangler.toml`: `[build]` is removed, `main` points at the prebundled
 `.wrangler/release/shim.js`, and `find_additional_modules=true` includes its Wasm
 module. All runtime bindings, variables and routes must be identical. The upload validates that comparison,
 uses cached Wrangler offline with `--no-bundle`, and does not execute the custom
-build or dependency build scripts. Wrangler's own cached runtime dependencies
-still necessarily have the upload credential. Rust follows the existing stable
+build or Rust dependency build scripts. Wrangler's own installation and cached
+runtime dependencies are trusted uploader code and can still reach the upload
+credential; this is not isolation from a compromised Wrangler package. Rust follows the existing stable
 toolchain policy; Wrangler and checkout are pinned. Offline tests enforce matching
 workflow/driver Wrangler pins and the prepared config comparison.
 

@@ -30,6 +30,16 @@ jobs:
           npx --yes wrangler@4.50.0 deploy --dry-run --outdir .wrangler/release
           python3 scripts/deploy.py --prepare
           npx --offline --yes wrangler@4.50.0 deploy --no-bundle --config .wrangler-release.toml --dry-run
+      - name: Retain this run's checked Worker bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: checked-worker
+          path: |
+            .wrangler/release/*.js
+            .wrangler/release/*.wasm
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
   deploy:
     needs: verify
     if: >-
@@ -47,16 +57,16 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Set up Rust
-        run: |
-          rustup update stable --no-self-update
-          rustup default stable
-          rustup target add wasm32-unknown-unknown
-      - name: Build without deployment credentials
+      - name: Download only this run's checked Worker bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: checked-worker
+          path: .wrangler/release
+      - name: Prepare the trusted uploader without deployment credentials
         env:
           WRANGLER_SEND_METRICS: 'false'
         run: |
-          npx --yes wrangler@4.50.0 deploy --dry-run --outdir .wrangler/release
+          npx --yes wrangler@4.50.0 --version
           python3 scripts/deploy.py --prepare
       - name: Deploy checked main commit and verify production
         env:
