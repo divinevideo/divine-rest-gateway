@@ -148,7 +148,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertNotIn("--outdir", upload)
         for setting in ("needs: verify", "github.ref == 'refs/heads/main' &&",
                         "vars.PRODUCTION_CD_ENABLED == 'true'", "environment: production",
-                        "group: production-worker", "cancel-in-progress: false"):
+                        "group: production-worker", "cancel-in-progress: false", "queue: max"):
             self.assertIn(setting, upload)
         prepare, release = upload.split("name: Deploy checked main commit", 1)
         self.assertNotIn("CLOUDFLARE_API_TOKEN", prepare)
