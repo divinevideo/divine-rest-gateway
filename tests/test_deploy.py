@@ -134,7 +134,7 @@ class ReleaseTests(unittest.TestCase):
         with patch.object(deploy.subprocess, "Popen", return_value=process), patch("builtins.print"), self.assertRaises(RuntimeError):
             deploy.deploy_worker()
 
-    def test_workflow_build_precedes_token_and_pins_match(self):
+    def test_workflow_gates_deploy_and_gives_token_only_to_upload_step(self):
         workflow = (Path(__file__).parents[1] / ".github/workflows/ci.yml").read_text()
         verify, upload = workflow.split("\n  deploy:", 1)
         self.assertNotIn("CLOUDFLARE_API_TOKEN", verify)
@@ -142,7 +142,16 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn("actions/download-artifact@", upload)
         self.assertNotIn("rustup", upload)
         self.assertNotIn("--outdir", upload)
-        self.assertLess(upload.index("name: Prepare the trusted uploader"), upload.index("CLOUDFLARE_API_TOKEN:"))
+        for setting in ("needs: verify", "github.ref == 'refs/heads/main' &&",
+                        "vars.PRODUCTION_CD_ENABLED == 'true'", "environment: production",
+                        "group: production-worker", "cancel-in-progress: false"):
+            self.assertIn(setting, upload)
+        prepare, release = upload.split("name: Deploy checked main commit", 1)
+        self.assertNotIn("CLOUDFLARE_API_TOKEN", prepare)
+        self.assertIn("CLOUDFLARE_API_TOKEN:", release)
+
+    def test_workflow_and_driver_pin_the_same_wrangler(self):
+        workflow = (Path(__file__).parents[1] / ".github/workflows/ci.yml").read_text()
         pins = deploy.re.findall(r"wrangler@([0-9.]+)", workflow)
         self.assertTrue(pins)
         self.assertEqual(set(pins), {deploy.WRANGLER_VERSION})
