@@ -122,13 +122,17 @@ class ReleaseTests(unittest.TestCase):
         process.__enter__.return_value = process
         process.stdout = iter(["build line\n", "Current Version ID: new\n"])
         process.wait.return_value = 0
+        calls = MagicMock()
         with patch.object(deploy.subprocess, "Popen", return_value=process) as popen, patch("builtins.print") as output:
+            calls.attach_mock(output, "print")
+            calls.attach_mock(process.wait, "wait")
             self.assertIn("Current Version ID: new", deploy.deploy_worker())
         command = popen.call_args.args[0]
         self.assertIn("--offline", command)
         self.assertIn("--no-bundle", command)
         self.assertIn(str(deploy.UPLOAD_CONFIG), command)
-        self.assertEqual(output.call_count, 2)
+        # Every line is printed before Wrangler exits, not buffered until afterwards.
+        self.assertEqual([name for name, _, _ in calls.mock_calls], ["print", "print", "wait"])
         process.wait.return_value = 1
         process.stdout = iter(["upload failed\n"])
         with patch.object(deploy.subprocess, "Popen", return_value=process), patch("builtins.print"), self.assertRaises(RuntimeError):
