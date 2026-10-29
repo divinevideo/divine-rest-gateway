@@ -15,7 +15,7 @@ The gateway runs at [gateway.divine.video](https://gateway.divine.video), which 
 | `GET` | `/event/{id}` | Convenience wrapper for a single event by ID |
 | `POST` | `/publish` | Publish a signed event (requires NIP-98 auth) |
 | `GET` | `/publish/status/{event_id}` | Look up the recorded status of a publish |
-| `POST` | `/api/links` | Create a short link for a Divine video or profile URL (requires NIP-98 auth; off unless enabled) |
+| `POST` | `/api/links` | Create a short link for a Divine video or profile URL (requires NIP-98 auth) |
 
 Every path except `/api/links` adds permissive CORS headers (`Access-Control-Allow-Origin: *`) to its responses and answers `OPTIONS` preflight requests. `/api/links` applies its own strict CORS policy, described below.
 
@@ -103,7 +103,7 @@ Creates a short link for a Divine video or profile URL, or returns the existing 
 
 - **Body:** at most 4096 bytes of `application/json` containing only a `url` field, either `https://divine.video/video/<id>` or `https://divine.video/profile/<pubkey>` (64 hex characters or an `npub`). IDs may contain ASCII letters, digits, `-`, `.`, `_` and `~`; query strings, fragments and percent-encoding are rejected with `400`.
 - **Authentication:** a NIP-98 event bound to this exact request: `u` is `https://gateway.divine.video/api/links`, `method` is `POST`, a `payload` tag holds the lowercase hex SHA-256 of the exact request body, and `created_at` is within 60 seconds. Anything else gets `401`.
-- **Quotas:** 30 requests per minute per authenticated pubkey and 120 per minute per client IP, counted in fixed one-minute windows. A request counts once it passes authentication and validation, before the shortener is called, so one that returns an existing link or ends in an upstream `503` still counts, and retrying a `503` uses quota. An exhausted quota gets `429` with `Retry-After: 60`; a `429` does not count.
+- **Quotas:** 30 requests per minute per authenticated pubkey and 120 per minute per client IPv4 address or IPv6 /64 network, counted in fixed one-minute windows. Equivalent IPv6 spellings and IPv4-mapped IPv6 addresses share the same network bucket. Invalid or missing trusted addresses fail closed. A request counts once it passes authentication and validation, before the shortener is called, so one that returns an existing link or ends in an upstream `503` still counts, and retrying a `503` uses quota. An exhausted quota gets `429` with `Retry-After: 60`; a `429` does not count.
 - **CORS:** browsers may call it only from `https://divine.video` and `https://www.divine.video`; other origins get `403`. Requests without an `Origin` header, such as those from native apps, are accepted.
 
 A new link returns `201 Created` and an existing one `200 OK`:
@@ -176,7 +176,7 @@ wrangler queues create divine-publish-events
 wrangler queues create divine-publish-failed
 ```
 
-Update the generated namespace IDs in `wrangler.toml` if they differ from the committed values. The `SHORT_LINK_LIMITER` Durable Object is created by the `v2` migration on deploy. Before enabling `POST /api/links`, store the link shortener's bearer token with `wrangler secret put SHORT_LINK_CREATION_TOKEN`.
+Update the generated namespace IDs in `wrangler.toml` if they differ from the committed values. The `SHORT_LINK_LIMITER` Durable Object is created by the `v2` migration on deploy. Creation is enabled in the committed `wrangler.toml`, so store the link shortener's bearer token with `wrangler secret put SHORT_LINK_CREATION_TOKEN` before or immediately after the first deploy; until the secret exists, `POST /api/links` returns `503`.
 
 ## Configuration
 
@@ -186,7 +186,7 @@ Configuration lives in `wrangler.toml`:
 - **`REST_GATEWAY_CACHE`** (KV namespace) — stores cached query results and publish-status records.
 - **`RELAY_POOL`** (Durable Object, class `RelayPool`) — holds the persistent relay WebSocket connections.
 - **`PUBLISH_QUEUE`** (Queue producer → `divine-publish-events`) and its consumer, which retries up to 6 times with `divine-publish-failed` as the dead-letter queue.
-- **`SHORT_LINK_CREATION_ENABLED`** (var) — turns on `POST /api/links` when exactly `true`. It is `false` in `wrangler.toml`, and because `keep_vars` is not set, every `wrangler deploy` applies the committed value: a change made only in the Cloudflare dashboard is reverted by the next deploy.
+- **`SHORT_LINK_CREATION_ENABLED`** (var) — turns on `POST /api/links` when exactly `true`. Creation is enabled in `wrangler.toml`. Set it to `false` and deploy to pause creation while preserving existing redirects. Every normal `wrangler deploy` applies the committed value; dashboard-only changes are reverted by the next deploy.
 - **`SHORT_LINK_CREATION_TOKEN`** (secret) — the bearer token the gateway sends to the link shortener. Set it with `wrangler secret put SHORT_LINK_CREATION_TOKEN`; it is never returned to clients.
 - **`SHORT_LINK_LIMITER`** (Durable Object, class `ShortLinkLimiter`, SQLite storage from the `v2` migration) — enforces the short-link creation quotas.
 

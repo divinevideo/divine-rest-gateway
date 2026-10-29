@@ -83,9 +83,49 @@ pub fn origin_allowed(origin: Option<&str>) -> bool {
     )
 }
 
+/// Hash the trusted client network without retaining the address itself.
+pub fn ip_quota_key(ip: &str) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    use std::net::{IpAddr, Ipv6Addr};
+
+    let network = match ip.parse::<IpAddr>().ok()? {
+        IpAddr::V4(address) => address.to_string(),
+        IpAddr::V6(address) => match address.to_ipv4_mapped() {
+            Some(address) => address.to_string(),
+            None => Ipv6Addr::from(u128::from(address) & (u128::MAX << 64)).to_string(),
+        },
+    };
+    Some(hex::encode(Sha256::digest(format!(
+        "short-link:ip:{network}"
+    ))))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ipv6_quota_covers_one_network_and_normalizes_equivalent_addresses() {
+        assert_eq!(
+            ip_quota_key("2001:db8:1234:5678::1"),
+            ip_quota_key("2001:db8:1234:5678::ffff")
+        );
+        assert_eq!(
+            ip_quota_key("2001:db8::1"),
+            ip_quota_key("2001:0db8:0000:0000:0000:0000:0000:0001")
+        );
+        assert_eq!(
+            ip_quota_key("192.0.2.43"),
+            ip_quota_key("::ffff:192.0.2.43")
+        );
+        assert_ne!(
+            ip_quota_key("2001:db8:1234:5678::1"),
+            ip_quota_key("2001:db8:1234:5679::1")
+        );
+        assert_ne!(ip_quota_key("192.0.2.43"), ip_quota_key("192.0.2.44"));
+        assert_eq!(ip_quota_key("not-an-address"), None);
+        assert_eq!(ip_quota_key(""), None);
+    }
 
     #[test]
     fn only_complete_canonical_video_and_profile_targets_are_accepted() {
