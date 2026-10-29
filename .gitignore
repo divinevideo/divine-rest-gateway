@@ -4,3 +4,4 @@
 node_modules
 .dev.vars
 .private-journal
+/.wrangler-release.toml
