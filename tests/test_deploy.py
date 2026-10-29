@@ -134,9 +134,14 @@ class ReleaseTests(unittest.TestCase):
         self.assertTrue(pins)
         self.assertEqual(set(pins), {deploy.WRANGLER_VERSION})
 
-    def run_driver(self, *, stale=False, upload_failure=False, health_failure=False):
+    @staticmethod
+    def serving(deployment_id, version):
+        return {"id": deployment_id, "versions": [{"version_id": version, "percentage": 100}]}
+
+    def run_driver(self, *, stale=False, upload_failure=False, health_failure=False, lookups=None):
+        """`lookups` overrides the provider's active deployments, in call order, to simulate a mismatch."""
         version = "00000000-0000-4000-8000-000000000001"
-        active = {"id": "deployment", "versions": [{"version_id": version, "percentage": 100}]}
+        active = self.serving("deployment", version)
         env = self.env | {"CLOUDFLARE_ACCOUNT_ID": "0" * 32,
                           "CLOUDFLARE_API_TOKEN": "synthetic-token", "GH_TOKEN": "synthetic-token"}
         calls = MagicMock()
@@ -144,7 +149,7 @@ class ReleaseTests(unittest.TestCase):
             receipt = Path(directory) / "receipt.json"
             with patch.object(deploy.os, "environ", env), \
                     patch.object(deploy, "Path", return_value=receipt), \
-                    patch.object(deploy, "active_deployment", return_value=active) as lookup, \
+                    patch.object(deploy, "active_deployment", return_value=active, side_effect=lookups) as lookup, \
                     patch.object(deploy, "get_json", return_value={"sha": "b" * 40 if stale else self.sha}), \
                     patch.object(deploy.subprocess, "check_output", return_value=self.sha + "\n"), \
                     patch.object(deploy, "require_upload_config"), \
@@ -156,7 +161,7 @@ class ReleaseTests(unittest.TestCase):
                 calls.attach_mock(lookup, "lookup")
                 calls.attach_mock(upload, "upload")
                 calls.attach_mock(health, "health")
-                if stale or upload_failure or health_failure:
+                if stale or upload_failure or health_failure or lookups is not None:
                     with self.assertRaises(RuntimeError):
                         deploy.main()
                 else:
@@ -182,6 +187,19 @@ class ReleaseTests(unittest.TestCase):
     def test_upload_and_health_failures_are_not_success(self):
         self.assertEqual(self.run_driver(upload_failure=True)["result"], "failed")
         self.assertEqual(self.run_driver(health_failure=True)["result"], "failed")
+
+    def test_upload_that_never_serves_is_not_success(self):
+        previous = self.serving("previous", "00000000-0000-4000-8000-000000000000")
+        receipt = self.run_driver(lookups=[previous] * 4)
+        self.assertEqual(receipt["result"], "failed")
+        self.assertNotIn("deployment_id", receipt)
+
+    def test_release_replaced_after_health_probe_is_not_success(self):
+        uploaded = self.serving("deployment", "00000000-0000-4000-8000-000000000001")
+        other = self.serving("other", "00000000-0000-4000-8000-000000000002")
+        receipt = self.run_driver(lookups=[uploaded, uploaded] + [other] * 3)
+        self.assertEqual(receipt["result"], "failed")
+        self.assertEqual(self.calls, ["lookup", "upload", "lookup", "health", "lookup", "lookup", "lookup"])
 
 
 if __name__ == "__main__":
