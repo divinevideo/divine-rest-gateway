@@ -139,25 +139,30 @@ class ReleaseTests(unittest.TestCase):
         active = {"id": "deployment", "versions": [{"version_id": version, "percentage": 100}]}
         env = self.env | {"CLOUDFLARE_ACCOUNT_ID": "0" * 32,
                           "CLOUDFLARE_API_TOKEN": "synthetic-token", "GH_TOKEN": "synthetic-token"}
+        calls = MagicMock()
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "receipt.json"
             with patch.object(deploy.os, "environ", env), \
                     patch.object(deploy, "Path", return_value=receipt), \
-                    patch.object(deploy, "active_deployment", return_value=active), \
+                    patch.object(deploy, "active_deployment", return_value=active) as lookup, \
                     patch.object(deploy, "get_json", return_value={"sha": "b" * 40 if stale else self.sha}), \
                     patch.object(deploy.subprocess, "check_output", return_value=self.sha + "\n"), \
                     patch.object(deploy, "require_upload_config"), \
                     patch.object(deploy, "deploy_worker", return_value=f"Current Version ID: {version}\n",
                                  side_effect=RuntimeError("upload failed") if upload_failure else None) as upload, \
                     patch.object(deploy.time, "sleep"), \
-                    patch.object(deploy, "check_health", side_effect=RuntimeError("unhealthy") if health_failure else None), \
+                    patch.object(deploy, "check_health", side_effect=RuntimeError("unhealthy") if health_failure else None) as health, \
                     patch("builtins.print"):
+                calls.attach_mock(lookup, "lookup")
+                calls.attach_mock(upload, "upload")
+                calls.attach_mock(health, "health")
                 if stale or upload_failure or health_failure:
                     with self.assertRaises(RuntimeError):
                         deploy.main()
                 else:
                     deploy.main()
                 self.assertEqual(upload.call_count, 0 if stale else 1)
+                self.calls = [name for name, _, _ in calls.mock_calls]
                 return json.loads(receipt.read_text())
 
     def test_success_receipt(self):
@@ -166,6 +171,10 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(receipt["source_sha"], self.sha)
         self.assertEqual(receipt["version_id"], "00000000-0000-4000-8000-000000000001")
         self.assertEqual(receipt["deployment_id"], "deployment")
+
+    def test_success_rechecks_active_version_after_health_probe(self):
+        self.run_driver()
+        self.assertEqual(self.calls, ["lookup", "upload", "lookup", "health", "lookup"])
 
     def test_stale_run_never_uploads(self):
         self.assertEqual(self.run_driver(stale=True)["result"], "failed")
