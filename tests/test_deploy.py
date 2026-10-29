@@ -151,8 +151,10 @@ class ReleaseTests(unittest.TestCase):
                         "group: production-worker", "cancel-in-progress: false", "queue: max"):
             self.assertIn(setting, upload)
         prepare, release = upload.split("name: Deploy checked main commit", 1)
+        release, _, later = release.partition("\n      - ")
         self.assertNotIn("CLOUDFLARE_API_TOKEN", prepare)
         self.assertIn("CLOUDFLARE_API_TOKEN:", release)
+        self.assertNotIn("CLOUDFLARE_API_TOKEN", later)
 
     def test_workflow_and_driver_pin_the_same_wrangler(self):
         workflow = (Path(__file__).parents[1] / ".github/workflows/ci.yml").read_text()
