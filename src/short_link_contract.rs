@@ -1,4 +1,4 @@
-// ABOUTME: Pure request and response contract for authenticated short-link creation.
+// ABOUTME: Pure request and response contract for public short-link creation.
 
 use bech32::{primitives::decode::CheckedHrpstring, Bech32};
 use serde::{Deserialize, Serialize};

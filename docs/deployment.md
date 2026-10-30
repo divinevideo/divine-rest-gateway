@@ -16,9 +16,10 @@ complete.
    publish queue, consumer/dead-letter queue, custom domain and relay URL with
    the committed configuration. Reuse them; do not silently create replacements.
    Confirm existing runtime secrets by **name only**, including
-   `SHORT_LINK_CREATION_TOKEN` when applicable. Wrangler deploy preserves secrets,
-   but reapplies committed plain variables and routes. In particular,
-   `SHORT_LINK_CREATION_ENABLED=false` remains unchanged by this work. Reconcile
+   `SHORT_LINK_CREATION_TOKEN`. Wrangler deploy preserves secrets,
+   but reapplies committed plain variables and routes. In particular, every
+   release applies the committed `SHORT_LINK_CREATION_ENABLED=true`, which turns
+   on public short-link creation. Reconcile
    any dashboard-only feature setting before activation, not during a release.
 3. Configure the GitHub `production` environment before enabling CD. Restrict it
    to the protected `main` branch and apply the owner's production approval rules

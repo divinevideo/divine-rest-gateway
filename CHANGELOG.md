@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- **Short-link creation**: `POST /api/links` creates short links for Divine video and profile URLs through the link shortener, authenticated with body-bound NIP-98 and limited to 30 per minute per pubkey and 120 per minute per client IP. Off unless `SHORT_LINK_CREATION_ENABLED` is `true`.
+- **Short-link creation**: `POST /api/links` creates short links for Divine video and profile URLs through the link shortener without login or signature, limited to 120 per minute per client IP. Off unless `SHORT_LINK_CREATION_ENABLED` is `true`, which is the committed value.
 - `SHORT_LINK_LIMITER` SQLite Durable Object (migration `v2`) and the `SHORT_LINK_CREATION_TOKEN` secret
 - CI checks that run unit and offline deployment tests, compile the short-link runtime tests, and dry-build the Worker
 - Opt-in production deployment after checks on main, with a main-only manual replay, serialized activation, active-version and health verification, and a deployment/rollback runbook

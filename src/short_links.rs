@@ -1,6 +1,5 @@
-// ABOUTME: Body-bound authenticated creation proxy with explicit origins, quotas and deadlines.
+// ABOUTME: Anonymous creation proxy with explicit origins, IP quotas and deadlines.
 use crate::{
-    auth,
     short_link_contract::{origin_allowed, parse_creation_body, validate_mapping},
     short_link_limiter::QuotaKeys,
 };
@@ -80,16 +79,6 @@ async fn handle_inner(req: &mut Request, env: &Env, origin: Option<&str>) -> Res
         }
         body.extend(chunk);
     }
-    let authorization = req.headers().get("Authorization")?;
-    let identity = match auth::validate_creation(
-        authorization.as_deref(),
-        ENDPOINT,
-        &body,
-        (Date::now().as_millis() / 1000) as u64,
-    ) {
-        Ok(identity) => identity,
-        Err(_) => return Response::error("unauthorized", 401),
-    };
     let target = match parse_creation_body(&body) {
         Ok(target) => target,
         Err(_) => return Response::error("invalid_target", 400),
@@ -102,10 +91,6 @@ async fn handle_inner(req: &mut Request, env: &Env, origin: Option<&str>) -> Res
         return Response::error("temporarily_unavailable", 503);
     };
     let keys = QuotaKeys {
-        identity: hex::encode(Sha256::digest(format!(
-            "short-link:identity:{}",
-            identity.pubkey
-        ))),
         ip: hex::encode(Sha256::digest(format!("short-link:ip:{ip}"))),
     };
     let namespace = env.durable_object("SHORT_LINK_LIMITER")?;
