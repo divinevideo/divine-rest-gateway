@@ -175,7 +175,7 @@ wrangler queues create divine-publish-events
 wrangler queues create divine-publish-failed
 ```
 
-Update the generated namespace IDs in `wrangler.toml` if they differ from the committed values. The `SHORT_LINK_LIMITER` Durable Object is created by the `v2` migration on deploy. Before enabling `POST /api/links`, store the link shortener's bearer token with `wrangler secret put SHORT_LINK_CREATION_TOKEN`.
+Update the generated namespace IDs in `wrangler.toml` if they differ from the committed values. The `SHORT_LINK_LIMITER` Durable Object is created by the `v2` migration on deploy. `POST /api/links` is enabled in the committed configuration, so store the link shortener's bearer token with `wrangler secret put SHORT_LINK_CREATION_TOKEN` before the first deploy; until it exists, creation returns `503`.
 
 ## Configuration
 
