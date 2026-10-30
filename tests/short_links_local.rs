@@ -9,6 +9,8 @@ use std::{
 const LOCAL: &str = "http://127.0.0.1:9785/api/links";
 const BODY: &str = r#"{"url":"https://divine.video/video/shortener-gateway-verification"}"#;
 
+// Quotas use fixed calendar-minute windows; a burst that straddles a boundary is
+// counted against two windows and admits more than one window's quota.
 fn avoid_quota_window_boundary() {
     let seconds = SystemTime::now()
         .duration_since(UNIX_EPOCH)
