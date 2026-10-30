@@ -15,7 +15,7 @@ The gateway runs at [gateway.divine.video](https://gateway.divine.video), which 
 | `GET` | `/event/{id}` | Convenience wrapper for a single event by ID |
 | `POST` | `/publish` | Publish a signed event (requires NIP-98 auth) |
 | `GET` | `/publish/status/{event_id}` | Look up the recorded status of a publish |
-| `POST` | `/api/links` | Create a short link for a Divine video or profile URL (requires NIP-98 auth; off unless enabled) |
+| `POST` | `/api/links` | Create a short link for a Divine video or profile URL (no auth; off unless enabled) |
 
 Every path except `/api/links` adds permissive CORS headers (`Access-Control-Allow-Origin: *`) to its responses and answers `OPTIONS` preflight requests. `/api/links` applies its own strict CORS policy, described below.
 
@@ -121,7 +121,7 @@ The gateway is a single Cloudflare Worker with these moving parts:
 - **Cache (`src/cache.rs`)** — a thin layer over Workers KV (`REST_GATEWAY_CACHE`) storing query results and publish-status records. Query cache keys are a SHA-256 hash of the raw filter JSON, so any change to the filter (including custom tags) produces a distinct entry.
 - **RelayPool (`src/relay_pool.rs`)** — a Durable Object that opens a WebSocket to the configured Nostr relay and runs the actual `REQ`/`EVENT` exchange. It races message receipt against explicit timeouts (5 s overall, 1 s for empty results, 300 ms idle after the first event) so queries cannot hang indefinitely, and it returns as soon as the relay sends `EOSE`.
 - **Short links (`src/short_links.rs`, `src/short_link_contract.rs`)** — the `POST /api/links` handler: strict CORS, anonymous request and response contract checks, and the bounded call to the link shortener.
-- **ShortLinkLimiter (`src/short_link_limiter.rs`)** — a SQLite-backed Durable Object that serializes the per-IP creation quota so concurrent requests cannot exceed them.
+- **ShortLinkLimiter (`src/short_link_limiter.rs`)** — a SQLite-backed Durable Object that serializes the per-IP creation quota so concurrent requests cannot exceed it.
 
 On a cache miss the router forwards the raw filter to the RelayPool Durable Object, caches the returned events with a content-aware TTL, and responds. Responses also carry `Cache-Control: public, max-age=<ttl>, s-maxage=<ttl>`, so Cloudflare's edge cache absorbs repeated identical requests in front of KV.
 
