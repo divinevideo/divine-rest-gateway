@@ -15,7 +15,7 @@ The gateway runs at [gateway.divine.video](https://gateway.divine.video), which 
 | `GET` | `/event/{id}` | Convenience wrapper for a single event by ID |
 | `POST` | `/publish` | Publish a signed event (requires NIP-98 auth) |
 | `GET` | `/publish/status/{event_id}` | Look up the recorded status of a publish |
-| `POST` | `/api/links` | Create a short link for a Divine video or profile URL (requires NIP-98 auth) |
+| `POST` | `/api/links` | Create a short link for a Divine video or profile URL (requires NIP-98 auth; disabled by default) |
 
 Every path except `/api/links` adds permissive CORS headers (`Access-Control-Allow-Origin: *`) to its responses and answers `OPTIONS` preflight requests. `/api/links` applies its own strict CORS policy, described below.
 
@@ -103,8 +103,8 @@ Creates a short link for a Divine video or profile URL, or returns the existing 
 
 - **Body:** at most 4096 bytes of `application/json` containing only a `url` field, either `https://divine.video/video/<id>` or `https://divine.video/profile/<pubkey>` (64 hex characters or an `npub`). IDs may contain ASCII letters, digits, `-`, `.`, `_` and `~`; query strings, fragments and percent-encoding are rejected with `400`.
 - **Authentication:** a NIP-98 event bound to this exact request: `u` is `https://gateway.divine.video/api/links`, `method` is `POST`, a `payload` tag holds the lowercase hex SHA-256 of the exact request body, and `created_at` is within 60 seconds. Anything else gets `401`.
-- **Quotas:** 30 requests per minute per authenticated pubkey and 120 per minute per client IPv4 address or IPv6 /64 network, counted in fixed one-minute windows. Equivalent IPv6 spellings and IPv4-mapped IPv6 addresses share the same network bucket. Invalid or missing trusted addresses fail closed. A request counts once it passes authentication and validation, before the shortener is called, so one that returns an existing link or ends in an upstream `503` still counts, and retrying a `503` uses quota. An exhausted quota gets `429` with `Retry-After: 60`; a `429` does not count.
-- **CORS:** browsers may call it only from `https://divine.video` and `https://www.divine.video`; other origins get `403`. Requests without an `Origin` header, such as those from native apps, are accepted.
+- **Quotas:** 30 requests per minute per authenticated pubkey and 120 per minute per client IPv4 address or IPv6 /64 network. Fixed UTC-day budgets also limit each pubkey to 100 requests, each network to 300, and all creators together to 1,000. All five budgets are checked together and charged atomically; rotating identities or networks cannot bypass the global daily budget. Equivalent IPv6 spellings and IPv4-mapped IPv6 addresses share the same network bucket. Invalid or missing trusted addresses fail closed. A request counts once it passes authentication and validation, before the shortener is called, so one that returns an existing link or ends in an upstream `503` still counts, and retrying a `503` uses quota. An exhausted quota gets `429` with `Retry-After: 60` for minute limits or the remaining seconds until midnight UTC for daily limits; a `429` does not count. Expired counters are pruned through a SQLite index without resetting active usage. Daily budgets bound growth, not total permanent storage: archive capacity still requires monitoring and expansion before the 64 MiB backup limit.
+- **CORS:** browsers may call it only from `https://divine.video` and `https://www.divine.video`; other origins get `403`. Requests without an `Origin` header, such as those from native apps, are accepted. Allowed preflights are cached for 24 hours, and `Retry-After` is exposed to browser clients.
 
 A new link returns `201 Created` and an existing one `200 OK`:
 
@@ -112,7 +112,7 @@ A new link returns `201 Created` and an existing one `200 OK`:
 { "code": "Abc12345", "short_url": "https://divine.video/l/Abc12345", "url": "https://divine.video/video/<id>" }
 ```
 
-Upstream errors, timeouts and missing configuration return `503`; clients should fall back to the full URL. Responses are never cached (`Cache-Control: no-store`). The design and its local runtime tests are described in `docs/plans/2026-10-27-protected-short-links.md`.
+Upstream errors, timeouts and missing configuration return `503`; clients should fall back to the full URL. One 1.5-second deadline covers reading the request body, the limiter round trip, and the upstream request and response body. Missing upstream credentials fail before quota is charged. A deadline can stop waiting for a limiter call but cannot undo a quota charge already in flight. Failure diagnostics record only fixed stage labels and upstream status codes, never credentials or request data. Extra upstream response fields are ignored; the returned mapping still contains only the validated code, short URL and target. Responses are never cached (`Cache-Control: no-store`). The design and its local runtime tests are described in `docs/plans/2026-10-27-protected-short-links.md`.
 
 ## Architecture
 
@@ -162,7 +162,7 @@ wrangler deploy
 
 The build step is defined in `wrangler.toml` and runs `cargo install -q worker-build --version 0.7.1 --locked && worker-build --release`.
 
-The integration tests in `tests/integration_tests.rs` run against the live `https://gateway.divine.video` deployment, so they require network access. The short-link runtime tests in `tests/short_links_local.rs` run against a local `wrangler dev` and are ignored by default; `docs/plans/2026-10-27-protected-short-links.md` explains how to run them.
+The integration tests in `tests/integration_tests.rs` run against the live `https://gateway.divine.video` deployment, so they require network access. After building the Worker (`worker-build --release`), run `npm ci --ignore-scripts && npm test` to exercise the actual Wasm handler and SQLite limiter in isolated Miniflare state. CI runs these tests after its dry build. Outbound calls are intercepted locally and never create production mappings. The older opt-in HTTP harness in `tests/short_links_local.rs` still requires a separately configured local Worker; see `docs/plans/2026-10-27-protected-short-links.md`.
 
 Before first deploy, create the backing resources referenced by `wrangler.toml`:
 
@@ -176,7 +176,7 @@ wrangler queues create divine-publish-events
 wrangler queues create divine-publish-failed
 ```
 
-Update the generated namespace IDs in `wrangler.toml` if they differ from the committed values. The `SHORT_LINK_LIMITER` Durable Object is created by the `v2` migration on deploy. Creation is enabled in the committed `wrangler.toml`, so store the link shortener's bearer token with `wrangler secret put SHORT_LINK_CREATION_TOKEN` before or immediately after the first deploy; until the secret exists, `POST /api/links` returns `503`.
+Update the generated namespace IDs in `wrangler.toml` if they differ from the committed values. The `SHORT_LINK_LIMITER` Durable Object is created by the `v2` migration on deploy. Creation remains disabled in the committed `wrangler.toml`. Before enabling it, complete and record the backup, alert-delivery and internal-canary prerequisites in the [shortener runbook](https://github.com/divinevideo/divine-link-shortener/blob/main/docs/operations/short-links.md), and store the link shortener's bearer token with `wrangler secret put SHORT_LINK_CREATION_TOKEN`. A code merge is not operational activation evidence.
 
 ## Configuration
 
@@ -186,7 +186,7 @@ Configuration lives in `wrangler.toml`:
 - **`REST_GATEWAY_CACHE`** (KV namespace) — stores cached query results and publish-status records.
 - **`RELAY_POOL`** (Durable Object, class `RelayPool`) — holds the persistent relay WebSocket connections.
 - **`PUBLISH_QUEUE`** (Queue producer → `divine-publish-events`) and its consumer, which retries up to 6 times with `divine-publish-failed` as the dead-letter queue.
-- **`SHORT_LINK_CREATION_ENABLED`** (var) — turns on `POST /api/links` when exactly `true`. Creation is enabled in `wrangler.toml`. Set it to `false` and deploy to pause creation while preserving existing redirects. Every normal `wrangler deploy` applies the committed value; dashboard-only changes are reverted by the next deploy.
+- **`SHORT_LINK_CREATION_ENABLED`** (var) — turns on `POST /api/links` when exactly `true`. Creation is disabled in `wrangler.toml` until the operational prerequisites above are verified. Keep it `false` and deploy to pause creation while preserving existing redirects. Every normal `wrangler deploy` applies the committed value; dashboard-only changes are reverted by the next deploy.
 - **`SHORT_LINK_CREATION_TOKEN`** (secret) — the bearer token the gateway sends to the link shortener. Set it with `wrangler secret put SHORT_LINK_CREATION_TOKEN`; it is never returned to clients.
 - **`SHORT_LINK_LIMITER`** (Durable Object, class `ShortLinkLimiter`, SQLite storage from the `v2` migration) — enforces the short-link creation quotas.
 

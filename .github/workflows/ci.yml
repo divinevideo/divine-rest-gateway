@@ -30,6 +30,15 @@ jobs:
           npx --yes wrangler@4.50.0 deploy --dry-run --outdir .wrangler/release
           python3 scripts/deploy.py --prepare
           npx --offline --yes wrangler@4.50.0 deploy --no-bundle --config .wrangler-release.toml --dry-run
+      - name: Set up Node for isolated runtime tests
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Exercise the Worker and SQLite limiter locally
+        run: |
+          npm ci --ignore-scripts
+          npm test
       - name: Retain this run's checked Worker bundle
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

@@ -18,8 +18,9 @@ complete.
    Confirm existing runtime secrets by **name only**, including
    `SHORT_LINK_CREATION_TOKEN`. Wrangler deploy preserves secrets,
    but reapplies committed plain variables and routes. In particular, every
-   release applies the committed `SHORT_LINK_CREATION_ENABLED=true`, which turns
-   on authenticated short-link creation. Reconcile
+   release applies the committed `SHORT_LINK_CREATION_ENABLED=false`. Keep
+   creation disabled until recurring backups, alert delivery and an internal
+   canary are verified in the shortener operations runbook. Reconcile
    any dashboard-only feature setting before activation, not during a release.
 3. Configure the GitHub `production` environment before enabling CD. Restrict it
    to the protected `main` branch and apply the owner's production approval rules
@@ -45,8 +46,10 @@ complete.
 ## Release flow and evidence
 
 The `verify` job runs locked Rust library/protocol tests, offline deployment
-guard tests, compiles the runtime harness, and performs the pinned
-`wrangler@4.50.0 deploy --dry-run` build. It never runs live integration tests or
+guard tests, compiles the opt-in HTTP harness, performs the pinned
+`wrangler@4.50.0 deploy --dry-run` build, and executes the actual Wasm handler
+and SQLite limiter with `npm test` in isolated Miniflare state and locally
+intercepted upstream calls. It never runs live integration tests or
 side-effecting test traffic. Production `deploy` requires that exact workflow's
 `verify` success and uses the immutable `github.sha` checkout, not a moving branch.
 It uses the repository's existing Wrangler release build command in the

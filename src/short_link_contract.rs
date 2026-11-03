@@ -10,7 +10,6 @@ struct CreationRequest {
 }
 
 #[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct LinkMapping {
     pub code: String,
     pub short_url: String,
@@ -178,6 +177,27 @@ mod tests {
             assert!(validate_mapping(mapping.to_string().as_bytes(), target).is_err());
             mapping[field] = original;
         }
+    }
+
+    #[test]
+    fn upstream_mapping_accepts_additive_metadata_without_forwarding_it() {
+        let target = "https://divine.video/video/synthetic";
+        let mapping = validate_mapping(
+            serde_json::json!({
+                "code": "Abc12345", "short_url": "https://divine.video/l/Abc12345",
+                "url": target, "created_at": 1234
+            })
+            .to_string()
+            .as_bytes(),
+            target,
+        )
+        .expect("additive upstream metadata must not break creation");
+        assert_eq!(
+            serde_json::to_value(mapping).unwrap(),
+            serde_json::json!({
+                "code": "Abc12345", "short_url": "https://divine.video/l/Abc12345", "url": target
+            })
+        );
     }
 
     #[test]

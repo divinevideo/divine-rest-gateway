@@ -1,0 +1,16 @@
+{
+  "name": "divine-rest-gateway-runtime-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/short_links_runtime.test.mjs"
+  },
+  "devDependencies": {
+    "@noble/curves": "1.9.7",
+    "miniflare": "4.20260730.0"
+  },
+  "overrides": {
+    "undici": "7.30.1",
+    "sharp": "0.35.5"
+  }
+}
