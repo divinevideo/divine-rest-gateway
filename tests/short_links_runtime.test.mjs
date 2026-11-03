@@ -163,7 +163,7 @@ test("expired daily budgets reset without retaining old identities", async (t) =
 
 test("signed creation uses the upstream credential, tolerates metadata and forwards daily retry timing", async (t) => {
   let upstreamCalls = 0;
-  const { mf, sql } = await runtime(t, enabled, {
+  const { mf, sql, consume } = await runtime(t, enabled, {
     async outboundService(request) {
       upstreamCalls++;
       assert.equal(request.url, "https://divine.video/api/links");
@@ -179,7 +179,11 @@ test("signed creation uses the upstream credential, tolerates metadata and forwa
   await sql("UPDATE quotas SET count=1000 WHERE bucket='daily:global'");
   const blocked = await mf.dispatchFetch(endpoint, { method: "POST", headers: headers(), body });
   assert.equal(blocked.status, 429);
-  assert.ok(Number(blocked.headers.get("retry-after")) > 60);
+  const quota = await consume();
+  assert.equal(quota.status, 429);
+  const retry = Number(blocked.headers.get("retry-after"));
+  assert.ok(retry >= 1 && retry <= 86400);
+  assert.ok(Math.abs(retry - Number(quota.headers.get("retry-after"))) <= 1);
   assert.equal(blocked.headers.get("access-control-expose-headers"), "Retry-After");
   assert.equal(upstreamCalls, 1);
 });
