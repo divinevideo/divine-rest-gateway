@@ -42,12 +42,15 @@ complete.
    Then perform one controlled main release and inspect its evidence below.
    GitHub evaluates this repository-level switch before entering the environment.
 
+## Short-link release scope
+
+The committed creation flag is enabled for the authorized anonymous-creation release. Public creation, app sharing and HTTP redirect checks are in scope. Recurring backup activation, alert delivery and physical-device testing are not prerequisites for this release, per the maintainer's scope decision. They are not represented as passed or active. Initial network and global daily budgets bound creation volume; exhausting the shared daily budget makes clients fall back to full URLs until midnight UTC. This product setting does not enable automatic CD or change its credential and environment requirements above.
+
 ## Release flow and evidence
 
 The `verify` job runs locked Rust library/protocol tests, offline deployment
 guard tests, compiles the runtime harness, and performs the pinned
-`wrangler@4.50.0 deploy --dry-run` build. It never runs live integration tests or
-side-effecting test traffic. Production `deploy` requires that exact workflow's
+`wrangler@4.50.0 deploy --dry-run` build. It also runs isolated Miniflare tests of the real Wasm handler and SQLite limiter, with intercepted outbound requests and synthetic state. It never runs live integration tests or side-effecting production test traffic. Production `deploy` requires that exact workflow's
 `verify` success and uses the immutable `github.sha` checkout, not a moving branch.
 It uses the repository's existing Wrangler release build command in the
 `verify` job, which has no production environment or deployment token. That job

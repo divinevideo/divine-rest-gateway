@@ -102,8 +102,8 @@ Creates a short link for a Divine video or profile URL, or returns the existing 
 
 - **Body:** at most 4096 bytes of `application/json` containing only a `url` field, either `https://divine.video/video/<id>` or `https://divine.video/profile/<pubkey>` (64 hex characters or an `npub`). IDs may contain ASCII letters, digits, `-`, `.`, `_` and `~`; query strings, fragments and percent-encoding are rejected with `400`.
 - **Authentication:** none. Creation is public; no account, signature, or client credential is required. Existing clients may continue sending an Authorization header, which is ignored for this endpoint.
-- **Quotas:** 120 requests per minute per trusted client IP, counted in fixed one-minute windows. A request counts once it passes validation, before the shortener is called, so one that returns an existing link or ends in an upstream `503` still counts, and retrying a `503` uses quota. An exhausted quota gets `429` with `Retry-After: 60`; a `429` does not count.
-- **CORS:** browsers may call it only from `https://divine.video` and `https://www.divine.video`; other origins get `403`. Requests without an `Origin` header, such as those from native apps, are accepted.
+- **Quotas:** 120 requests per minute and 300 per UTC day per client IPv4 address or IPv6 /64 network, plus 1,000 requests per UTC day across the service. Equivalent IPv6 spellings and IPv4-mapped addresses share their network's bucket. Missing or invalid trusted client addresses fail closed. All three counters are checked together and charged in one SQLite statement. A validated request counts before calling the shortener, including reuse and upstream failures; rejected requests do not count. Minute exhaustion returns `429` with `Retry-After: 60`; daily exhaustion returns `429` with the seconds remaining in the UTC day. A shared daily cap can pause creation for everyone until midnight; clients fall back to full URLs. These are initial rollout budgets, not a measure of permanent storage capacity.
+- **CORS:** browsers may call it only from `https://divine.video` and `https://www.divine.video`; other origins get `403`. Requests without an `Origin` header, such as those from native apps, are accepted. Allowed preflights are cached for one day and browser callers can read `Retry-After`.
 
 A new link returns `201 Created` and an existing one `200 OK`:
 
@@ -111,7 +111,7 @@ A new link returns `201 Created` and an existing one `200 OK`:
 { "code": "Abc12345", "short_url": "https://divine.video/l/Abc12345", "url": "https://divine.video/video/<id>" }
 ```
 
-Upstream errors, timeouts and missing configuration return `503`; clients should fall back to the full URL. Responses are never cached (`Cache-Control: no-store`). The design and its local runtime tests are described in `docs/plans/2026-10-27-protected-short-links.md`.
+One 1.5-second deadline covers request streaming, quota access and the upstream response. Missing upstream configuration is rejected before charging quota. Upstream errors, timeouts and missing configuration return `503`; clients should fall back to the full URL. Responses are never cached (`Cache-Control: no-store`). The design and its local runtime tests are described in `docs/plans/2026-10-27-protected-short-links.md`.
 
 ## Architecture
 
@@ -161,7 +161,7 @@ wrangler deploy
 
 The build step is defined in `wrangler.toml` and runs `cargo install -q worker-build --version 0.7.1 --locked && worker-build --release`.
 
-The integration tests in `tests/integration_tests.rs` run against the live `https://gateway.divine.video` deployment, so they require network access. The short-link runtime tests in `tests/short_links_local.rs` run against a local `wrangler dev` and are ignored by default; `docs/plans/2026-10-27-protected-short-links.md` explains how to run them.
+The integration tests in `tests/integration_tests.rs` run against the live `https://gateway.divine.video` deployment, so they require network access. After building the Worker, `npm ci --ignore-scripts && npm test` exercises the real Wasm handler and SQLite quotas in isolated Miniflare state. Outbound requests are intercepted and no production credential is needed. The optional short-link runtime tests in `tests/short_links_local.rs` run against a local `wrangler dev` and are ignored by default; `docs/plans/2026-10-27-protected-short-links.md` explains how to run them.
 
 Before first deploy, create the backing resources referenced by `wrangler.toml`:
 
