@@ -7,11 +7,6 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 #[derive(Debug)]
-pub struct AuthResult {
-    pub pubkey: String,
-}
-
-#[derive(Debug)]
 pub enum AuthError {
     MissingHeader,
     InvalidFormat,
@@ -22,7 +17,6 @@ pub enum AuthError {
     InvalidUrl,
     Expired,
     InvalidSignature,
-    InvalidPayload,
 }
 
 impl std::fmt::Display for AuthError {
@@ -39,7 +33,6 @@ impl std::fmt::Display for AuthError {
             Self::InvalidUrl => write!(f, "url tag does not match request"),
             Self::Expired => write!(f, "auth event expired"),
             Self::InvalidSignature => write!(f, "invalid event signature"),
-            Self::InvalidPayload => write!(f, "payload tag does not match request"),
         }
     }
 }
@@ -56,38 +49,21 @@ pub(crate) struct AuthEvent {
     sig: String,
 }
 
-pub fn validate_nip98(
-    auth_header: Option<&str>,
-    method: &str,
-    url: &str,
-) -> Result<AuthResult, AuthError> {
+pub fn validate_nip98(auth_header: Option<&str>, method: &str, url: &str) -> Result<(), AuthError> {
     validate_at(
         auth_header,
         method,
         url,
-        None,
         (js_sys::Date::now() / 1000.0) as u64,
     )
-}
-
-/// Strict body-bound authentication for the protected creator. The injected time
-/// keeps the entire protocol validator testable without a JavaScript runtime.
-pub fn validate_creation(
-    auth_header: Option<&str>,
-    url: &str,
-    body: &[u8],
-    now: u64,
-) -> Result<AuthResult, AuthError> {
-    validate_at(auth_header, "POST", url, Some(body), now)
 }
 
 fn validate_at(
     auth_header: Option<&str>,
     method: &str,
     url: &str,
-    body: Option<&[u8]>,
     now: u64,
-) -> Result<AuthResult, AuthError> {
+) -> Result<(), AuthError> {
     let header = auth_header.ok_or(AuthError::MissingHeader)?;
     if header.len() > 16384 {
         return Err(AuthError::InvalidFormat);
@@ -106,28 +82,16 @@ fn validate_at(
         return Err(AuthError::Expired);
     }
     let method_tag = unique_tag(&event, "method").ok_or(AuthError::InvalidMethod)?;
-    if if body.is_some() {
-        method_tag != method
-    } else {
-        !method_tag.eq_ignore_ascii_case(method)
-    } {
+    if !method_tag.eq_ignore_ascii_case(method) {
         return Err(AuthError::InvalidMethod);
     }
     if unique_tag(&event, "u") != Some(url) {
         return Err(AuthError::InvalidUrl);
     }
-    if let Some(body) = body {
-        let digest = hex::encode(Sha256::digest(body));
-        if unique_tag(&event, "payload") != Some(digest.as_str()) {
-            return Err(AuthError::InvalidPayload);
-        }
-    }
     if !verify_signature(&event) {
         return Err(AuthError::InvalidSignature);
     }
-    Ok(AuthResult {
-        pubkey: event.pubkey.to_ascii_lowercase(),
-    })
+    Ok(())
 }
 
 fn unique_tag<'a>(event: &'a AuthEvent, name: &str) -> Option<&'a str> {
@@ -233,35 +197,19 @@ mod tests {
         assert!(!verify_signature(&event));
     }
 
-    fn signed_creation_header(body: &[u8], now: u64, extra: Option<Vec<String>>) -> String {
-        signed_creation_header_with_case(body, now, extra, false)
-    }
-
-    fn signed_creation_header_with_case(
-        body: &[u8],
-        now: u64,
-        extra: Option<Vec<String>>,
-        uppercase: bool,
-    ) -> String {
+    fn signed_header(now: u64, kind: u32, tags: Vec<Vec<String>>, uppercase: bool) -> String {
         let key = k256::schnorr::SigningKey::from_bytes(&[1u8; 32]).unwrap();
         let mut event = AuthEvent {
             id: String::new(),
             pubkey: hex::encode(key.verifying_key().to_bytes()),
             created_at: now,
-            kind: 27235,
+            kind,
             content: String::new(),
             sig: String::new(),
-            tags: vec![
-                vec!["u".into(), "https://gateway.divine.video/api/links".into()],
-                vec!["method".into(), "POST".into()],
-                vec!["payload".into(), hex::encode(Sha256::digest(body))],
-            ],
+            tags,
         };
         if uppercase {
             event.pubkey = event.pubkey.to_ascii_uppercase();
-        }
-        if let Some(tag) = extra {
-            event.tags.push(tag);
         }
         let serialized = serde_json::json!([
             0,
@@ -285,47 +233,129 @@ mod tests {
         )
     }
 
-    #[test]
-    fn equivalent_key_encodings_share_one_authenticated_identity() {
-        let body = br#"{"url":"https://divine.video/video/synthetic"}"#;
-        let url = "https://gateway.divine.video/api/links";
-        let lower = signed_creation_header_with_case(body, 1000, None, false);
-        let upper = signed_creation_header_with_case(body, 1000, None, true);
-        let lower = validate_creation(Some(&lower), url, body, 1000).unwrap();
-        let upper = validate_creation(Some(&upper), url, body, 1000).unwrap();
-        assert_eq!(lower.pubkey, upper.pubkey);
+    const PUBLISH_URL: &str = "https://gateway.divine.video/publish";
+
+    fn publish_tags() -> Vec<Vec<String>> {
+        vec![
+            vec!["u".into(), PUBLISH_URL.into()],
+            vec!["method".into(), "POST".into()],
+        ]
     }
 
     #[test]
-    fn creation_auth_binds_body_url_timestamp_and_unique_tags() {
-        let body = br#"{"url":"https://divine.video/video/synthetic"}"#;
-        let url = "https://gateway.divine.video/api/links";
-        let header = signed_creation_header(body, 1000, None);
-        assert!(validate_creation(Some(&header), url, body, 1000).is_ok());
-        assert!(matches!(
-            validate_creation(Some(&header), url, b"changed", 1000),
-            Err(AuthError::InvalidPayload)
-        ));
-        assert!(matches!(
-            validate_creation(Some(&header), "https://other.example/api/links", body, 1000),
-            Err(AuthError::InvalidUrl)
-        ));
+    fn publish_auth_accepts_valid_signatures_and_equivalent_key_encodings() {
+        for uppercase in [false, true] {
+            let header = signed_header(1000, 27235, publish_tags(), uppercase);
+            assert!(validate_at(Some(&header), "POST", PUBLISH_URL, 1000).is_ok());
+        }
+    }
+
+    #[test]
+    fn publish_auth_limits_clock_skew_in_both_directions() {
+        let header = signed_header(1000, 27235, publish_tags(), false);
+        for now in [940, 1060] {
+            assert!(validate_at(Some(&header), "POST", PUBLISH_URL, now).is_ok());
+        }
         for now in [939, 1061, u64::MAX] {
             assert!(matches!(
-                validate_creation(Some(&header), url, body, now),
+                validate_at(Some(&header), "POST", PUBLISH_URL, now),
                 Err(AuthError::Expired)
             ));
         }
-        for tag in [
-            vec!["method".into(), "POST".into()],
-            vec!["u".into(), url.into()],
-            vec!["payload".into(), "bad".into()],
-        ] {
-            let header = signed_creation_header(body, 1000, Some(tag));
-            assert!(validate_creation(Some(&header), url, body, 1000).is_err());
+    }
+
+    #[test]
+    fn publish_auth_binds_exact_url_and_case_insensitive_method() {
+        let header = signed_header(1000, 27235, publish_tags(), false);
+        assert!(matches!(
+            validate_at(Some(&header), "POST", "https://other.example/publish", 1000),
+            Err(AuthError::InvalidUrl)
+        ));
+        assert!(matches!(
+            validate_at(Some(&header), "GET", PUBLISH_URL, 1000),
+            Err(AuthError::InvalidMethod)
+        ));
+        assert!(validate_at(Some(&header), "post", PUBLISH_URL, 1000).is_ok());
+    }
+
+    #[test]
+    fn publish_auth_rejects_duplicate_missing_or_malformed_binding_tags() {
+        for name in ["u", "method"] {
+            for malformed in [
+                None,
+                Some(vec![name.into()]),
+                Some(vec![name.into(), "value".into(), "extra".into()]),
+            ] {
+                let mut tags = publish_tags();
+                tags.retain(|tag| tag[0] != name);
+                if let Some(tag) = malformed {
+                    tags.push(tag);
+                }
+                let header = signed_header(1000, 27235, tags, false);
+                let result = validate_at(Some(&header), "POST", PUBLISH_URL, 1000);
+                if name == "u" {
+                    assert!(matches!(result, Err(AuthError::InvalidUrl)));
+                } else {
+                    assert!(matches!(result, Err(AuthError::InvalidMethod)));
+                }
+            }
+            let mut tags = publish_tags();
+            tags.push(tags.iter().find(|tag| tag[0] == name).unwrap().clone());
+            let header = signed_header(1000, 27235, tags, false);
+            let result = validate_at(Some(&header), "POST", PUBLISH_URL, 1000);
+            if name == "u" {
+                assert!(matches!(result, Err(AuthError::InvalidUrl)));
+            } else {
+                assert!(matches!(result, Err(AuthError::InvalidMethod)));
+            }
         }
-        let tampered = header.replace("Nostr ", "Bearer ");
-        assert!(validate_creation(Some(&tampered), url, body, 1000).is_err());
+    }
+
+    #[test]
+    fn publish_auth_rejects_wrong_kind_and_invalid_signature() {
+        let header = signed_header(1000, 1, publish_tags(), false);
+        assert!(matches!(
+            validate_at(Some(&header), "POST", PUBLISH_URL, 1000),
+            Err(AuthError::InvalidKind)
+        ));
+        let header = signed_header(1000, 27235, publish_tags(), false);
+        let bytes = STANDARD
+            .decode(header.strip_prefix("Nostr ").unwrap())
+            .unwrap();
+        let mut event: AuthEvent = serde_json::from_slice(&bytes).unwrap();
+        event.sig = "00".repeat(64);
+        let tampered = format!(
+            "Nostr {}",
+            STANDARD.encode(serde_json::to_vec(&event).unwrap())
+        );
+        assert!(matches!(
+            validate_at(Some(&tampered), "POST", PUBLISH_URL, 1000),
+            Err(AuthError::InvalidSignature)
+        ));
+    }
+
+    #[test]
+    fn publish_auth_rejects_missing_malformed_and_oversized_headers() {
+        assert!(matches!(
+            validate_at(None, "POST", PUBLISH_URL, 1000),
+            Err(AuthError::MissingHeader)
+        ));
+        assert!(matches!(
+            validate_at(Some("Bearer test"), "POST", PUBLISH_URL, 1000),
+            Err(AuthError::InvalidFormat)
+        ));
+        assert!(matches!(
+            validate_at(Some("Nostr !!!"), "POST", PUBLISH_URL, 1000),
+            Err(AuthError::InvalidBase64)
+        ));
+        assert!(matches!(
+            validate_at(Some("Nostr e30="), "POST", PUBLISH_URL, 1000),
+            Err(AuthError::InvalidJson)
+        ));
+        assert!(matches!(
+            validate_at(Some(&"Nostr ".repeat(3000)), "POST", PUBLISH_URL, 1000),
+            Err(AuthError::InvalidFormat)
+        ));
     }
 
     #[test]
@@ -357,42 +387,5 @@ mod tests {
             AuthError::InvalidSignature.to_string(),
             "invalid event signature"
         );
-    }
-
-    #[test]
-    fn creation_auth_rejects_invalid_headers_and_binding_changes() {
-        let body = br#"{"url":"https://divine.video/video/synthetic"}"#;
-        let url = "https://gateway.divine.video/api/links";
-        for header in [
-            None,
-            Some("Bearer test"),
-            Some("Nostr !!!"),
-            Some("Nostr e30="),
-        ] {
-            assert!(validate_creation(header, url, body, 1000).is_err());
-        }
-        let header = signed_creation_header(body, 1000, None);
-        for mutation in ["method", "kind", "payload", "signature"] {
-            let bytes = STANDARD
-                .decode(header.strip_prefix("Nostr ").unwrap())
-                .unwrap();
-            let mut event: AuthEvent = serde_json::from_slice(&bytes).unwrap();
-            match mutation {
-                "method" => event.tags[1][1] = "GET".into(),
-                "kind" => event.kind = 1,
-                "payload" => {
-                    event.tags.pop();
-                }
-                _ => event.sig = "00".repeat(64),
-            }
-            let changed = format!(
-                "Nostr {}",
-                STANDARD.encode(serde_json::to_vec(&event).unwrap())
-            );
-            assert!(
-                validate_creation(Some(&changed), url, body, 1000).is_err(),
-                "{mutation}"
-            );
-        }
     }
 }

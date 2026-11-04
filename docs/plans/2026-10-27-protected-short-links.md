@@ -1,35 +1,25 @@
-# Protected short-link creation
+# Public short-link creation
 
-The existing REST gateway owns authenticated client creation at https://gateway.divine.video/api/links. The Fastly creator remains server-only; its bearer is a Cloudflare secret and never reaches a client. Public resolution stays at https://divine.video/api/links/:code.
+The REST gateway serves public creation at https://gateway.divine.video/api/links. No account, signature or client credential is required. The Fastly creator remains server-only; its bearer is a Cloudflare secret and never reaches clients. Public resolution stays at https://divine.video/api/links/:code.
 
-The endpoint is disabled unless SHORT_LINK_CREATION_ENABLED is exactly true. Only the canonical gateway origin serves it, including when workers.dev can reach this Worker. POST accepts at most 4096 bytes of application/json containing one url. Only the existing shortener's canonical video/profile target grammar is accepted. No query, fragments, credentials, alternate origins, nested aliases, or identifier truncation.
+POST accepts at most 4096 bytes of application/json containing one url. Only canonical Divine video/profile targets are accepted, with full identifiers. The endpoint requires the canonical gateway URL; it rejects query strings and disallowed browser origins. Browser origins https://divine.video and https://www.divine.video are allowed; native and command-line requests may omit Origin. Existing clients may continue sending Authorization headers, but creation ignores them.
 
-NIP-98 authentication binds kind 27235, the exact canonical endpoint, exact POST method, the SHA-256 of the exact body, and a timestamp within 60 seconds. Reject missing/duplicate/ambiguous binding tags, oversized authorization, invalid event IDs and invalid BIP340 signatures. Nostr signs the event ID directly; do not hash it a second time. Replays within the short validity window are permitted for this idempotent operation, charge quota again, and can only create the same body-bound mapping.
+The existing SQLite Durable Object enforces 120 requests per trusted client IPv4 address or IPv6 /64 per fixed minute, 300 per network per UTC day, and 1,000 across the service per UTC day. Equivalent addresses normalize before hashing; invalid or missing trusted addresses fail closed. All three counters are checked synchronously and charged in one SQLite statement. Indexed cleanup expires minute and daily rows. Existing canonical IPv4 minute counters survive deployment; historical individual-IPv6 counters cannot be retroactively aggregated into /64 counters. No per-account quota or login is needed. Minute exhaustion returns 429 with Retry-After: 60; daily exhaustion returns the seconds until midnight UTC. Clients fall back to full URLs if a cap is exhausted. A caller can exhaust the shared cap, pausing new short links for everyone until the next day. These initial rollout budgets bound request volume, not the eventual size of permanent storage.
 
-A SQLite Durable Object enforces fixed one-minute quotas before any upstream request: 30 per authenticated pubkey and 120 per trusted CF-Connecting-IP. Missing IP or unavailable limits fail closed. Counters store domain-separated hashes, no raw identifiers; expire old windows. One named object serializes checks synchronously, preventing concurrent requests from exceeding either quota. Initial capacity is intentionally conservative; shard only with measured need and equivalent limits.
+Upstream is fixed to https://divine.video/api/links and uses only the server-held bearer. Redirects are disabled, request/response sizes bounded, and one 1500 ms deadline covers request streaming, the limiter and upstream response. A limiter call already in flight can charge quota after the caller times out. Missing upstream configuration is checked before quota is charged. Additive upstream metadata is ignored while required mapping fields remain validated. The complete returned code/short_url/url mapping must match the requested target. All responses are no-store. SHORT_LINK_CREATION_ENABLED=true enables creation; false pauses creation while existing links keep resolving.
 
-The endpoint owns CORS before the legacy router's wildcard handling. Only https://divine.video and https://www.divine.video browser origins are allowed; native requests may omit Origin. Errors, preflight and successful responses are no-store, nosniff, and vary by Origin. Authentication never depends on CORS. No credential, pubkey, IP or authorization header is logged.
+## Rollout scope
 
-Upstream is fixed to https://divine.video/api/links, redirects disabled, body/output bounded, with a bounded deadline. Forward only JSON and the server bearer. Validate the complete returned code/short_url/url mapping against the requested target before responding; upstream failures become controlled 503. Quota exhaustion returns 429 with Retry-After. Disabled feature returns 503. Caller timeout/failure falls back to the full canonical URL.
+Public creation, app sharing and HTTP redirect verification are the authorized release scope. Recurring backups, alert delivery and physical-device testing are not prerequisites for this release. This records the maintainer's scope decision; it does not claim those operations are active or tested. This anonymous API supersedes the authenticated rollout proposal in PR #9. Existing redirects and `/publish` authentication are unaffected.
 
-Implementation and verification:
-
-1. Signed synthetic Nostr regression, then correct raw event-ID verification; native auth tests pin binding/expiry/body/signature failure.
-2. Pure creation contract tests pin canonical URLs, JSON shape, origin rules and returned mapping.
-3. Add Worker handler and limiter, preserve existing routes, add a v2 SQLite migration and default-off variable.
-4. Build Wasm and run local Wrangler HTTP tests for auth, CORS, gate, concurrency/quota, failure and positive creation against the fixed production shortener using only synthetic verification targets. Inspect production bindings before deployment; provision only the new secret/object. Default gate stays off until smoke checks pass. SHORT_LINK_CREATION_ENABLED is declared in wrangler.toml and keep_vars is not set, so every wrangler deploy applies the committed value and reverts a dashboard-only change; open or close the gate by changing the committed value.
-5. Independent current-diff review and normal CI/merge. Sender gates remain off until receiving and device compatibility gates pass.
-
-## Local runtime verification
-
-Use only a synthetic target and an isolated local state directory. Put the server-only SHORT_LINK_CREATION_TOKEN in ignored .dev.vars with mode 0600; never put the credential in a command argument. A valid bearer calls the fixed production shortener and creates/reuses only the synthetic verification mapping. The local Worker keeps the gateway's canonical URL through the documented local-upstream override.
+## Isolated runtime verification
 
 ```sh
-wrangler deploy --dry-run
-wrangler dev --local --port 9785 --inspector-port 9786 --local-upstream gateway.divine.video --upstream-protocol https --var SHORT_LINK_CREATION_ENABLED:true --persist-to .wrangler/short-links-smoke
-cargo test --locked --test short_links_local -- --ignored --test-threads=1
+worker-build --release
+npm ci --ignore-scripts
+npm test
 ```
 
-Run the test command in a second terminal. The tests require unused synthetic quota windows; do not reuse state within the same minute. They test the actual Wasm handler and SQLite object, including 35 concurrent calls with exactly 30 identity admits and 125 calls across five keys with exactly 120 IP admits. Upstream availability and local clock boundaries are environment-dependent; the IP test permits controlled 503 for an admitted request when the upstream deadline expires.
+Tests execute the real Wasm handler and SQLite limiter in fresh local state. They intercept every outbound request, use only synthetic fixtures and fail on unexpected network access. No production bearer or physical device is needed. Coverage includes concurrent minute and daily budgets, expiry and existing-counter preservation, anonymous creation, IPv6 network normalization, compatibility with old Authorization headers, CORS, missing configuration and body/limiter deadlines. CI builds the Worker and runs these tests before retaining its checked bundle.
 
-The default cargo test run intentionally does not start a Worker or use a production bearer. CI compiles this harness, runs pure protocol/contract tests, and builds the Wasm package without deploying. Local runtime evidence is required separately.
+`cargo test` also includes the existing read/auth-rejection integration tests against the live gateway; the optional creation tests in `tests/short_links_local.rs` stay ignored by default. Those optional tests need a separately started local Wrangler and upstream access. They are not part of the isolated suite or a release prerequisite. Production deployment follows the checked-main release runbook.
