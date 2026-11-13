@@ -17,6 +17,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Short-link video targets may carry `?author=<64 lowercase hex>`. A video's `d` tag is not unique across accounts, so Divine share links name the author; other query strings stay rejected.
 - Creation normalizes client networks, expires quota rows through an index, exposes quota retry timing and applies one 1.5-second deadline to body, limiter and upstream work.
 - Removed the unused body-bound creation authenticator; NIP-98 validation and its protocol coverage remain on `/publish`.
 

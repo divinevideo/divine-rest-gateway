@@ -28,10 +28,29 @@ pub fn parse_creation_body(body: &[u8]) -> Result<String, ()> {
     }
 }
 
+/// Splits off the one query a video target may carry: `?author=` with the
+/// author's 64-character lowercase hex public key. A video's `d` tag is not
+/// unique across accounts, so share links name the author to keep a shortened
+/// link on that account's video.
+fn split_video_author(raw: &str) -> (&str, bool) {
+    match raw.rsplit_once("?author=") {
+        Some((base, author))
+            if author.len() == 64
+                && author
+                    .bytes()
+                    .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) =>
+        {
+            (base, true)
+        }
+        _ => (raw, false),
+    }
+}
+
 fn valid_target(raw: &str) -> bool {
     if raw.len() > 2048 {
         return false;
     }
+    let (raw, has_author) = split_video_author(raw);
     let Some(path) = raw.strip_prefix("https://divine.video/") else {
         return false;
     };
@@ -50,6 +69,7 @@ fn valid_target(raw: &str) -> bool {
     }
     match kind {
         "video" => true,
+        "profile" if has_author => false,
         "profile" => {
             (id.len() == 64 && id.bytes().all(|b| b.is_ascii_hexdigit()))
                 || CheckedHrpstring::new::<Bech32>(id).is_ok_and(|value| {
@@ -129,8 +149,10 @@ mod tests {
     #[test]
     fn only_complete_canonical_video_and_profile_targets_are_accepted() {
         let key = "01".repeat(32);
+        let author = "e7d3".repeat(16);
         for target in [
             "https://divine.video/video/Case_Sensitive-ID".to_string(),
+            format!("https://divine.video/video/Case_Sensitive-ID?author={author}"),
             format!("https://divine.video/profile/{key}"),
         ] {
             let body = serde_json::json!({"url": target}).to_string();
@@ -146,6 +168,26 @@ mod tests {
             "https://divine.video/profile/short",
             "https://divine.video/video/a/b",
             "https://divine.video/video/a#b",
+        ] {
+            assert!(
+                parse_creation_body(serde_json::json!({"url": target}).to_string().as_bytes())
+                    .is_err(),
+                "{target}"
+            );
+        }
+        // Only a video target may name an author, and only as one exact
+        // lowercase hex key.
+        for target in [
+            format!("https://divine.video/profile/{key}?author={author}"),
+            format!(
+                "https://divine.video/video/a?author={}",
+                author.to_uppercase()
+            ),
+            format!("https://divine.video/video/a?author={author}0"),
+            format!("https://divine.video/video/a?author={author}&q=1"),
+            format!("https://divine.video/video/a?q=1&author={author}"),
+            format!("https://divine.video/video/a?author={author}?author={author}"),
+            format!("https://divine.video/video/?author={author}"),
         ] {
             assert!(
                 parse_creation_body(serde_json::json!({"url": target}).to_string().as_bytes())
